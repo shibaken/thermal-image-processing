@@ -1,1 +1,2 @@
 */5 * * * * python3 /app/manage.py process_imported_files_command >> /app/logs/process_imported_files_command.log 2>&1
+*/2 * * * * python3 /app/manage.py runcrons >> logs/cronjob.log 2>&1
