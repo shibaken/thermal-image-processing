@@ -10,7 +10,7 @@ tipapp/logs/
 pending_imports/
 data_storage/
 thermal_downloads/
-tipapp/thermal_data_processing
+thermal_data_processing/
 thermal_files_uploaded/
 *.log
 log.txt
