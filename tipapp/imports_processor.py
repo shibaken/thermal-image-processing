@@ -32,9 +32,9 @@ class ImportsProcessor():
                 # log watch
                 logger.info (seen_datetime+" File to be processed: "+ str(entry.path))   
 
-                two_char_extension = str(filename)[-3:]
-                three_char_extension = str(filename)[-4:]
-                if two_char_extension == '.7z' or three_char_extension == '.zip':
+                # Case-insensitive check
+                lower_filename = filename.lower()
+                if lower_filename.endswith('.7z') or lower_filename.endswith('.zip'):
                     try:
                         script_path = os.path.join(BASE_DIR, 'thermalimageprocessing/thermal_image_processing.sh')
                         dest_path = os.path.join(BASE_DIR, self.dest_path)
