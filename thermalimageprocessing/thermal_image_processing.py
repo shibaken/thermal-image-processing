@@ -429,7 +429,19 @@ else:
         success = False
         msg += "\nMosaic publishing on geoserver failed"
         print("Mosaic publishing on geoserver failed")
-    with open('./logs/' + flight_name + '.txt', 'w+') as fh:
+     
+    # with open('./logs/' + flight_name + '.txt', 'w+') as fh:
+    #     fh.write(msg)
+    # Calculate absolute path to the logs folder
+    # Script: .../thermal-image-processing/thermalimageprocessing/thermal_image_processing.py
+    # Logs:   .../thermal-image-processing/logs/
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    logs_folder = os.path.join(base_dir, 'logs')
+
+    # Ensure the folder exists just in case
+    if not os.path.exists(logs_folder):
+        os.makedirs(logs_folder)
+
+    # Write log file
+    with open(os.path.join(logs_folder, flight_name + '.txt'), 'w+') as fh:
         fh.write(msg)
-    #print(msg)
-    #send_notification_emails(flight_name, success, msg, footprint.districts)
