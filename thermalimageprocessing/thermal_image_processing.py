@@ -29,9 +29,19 @@ logger = logging.getLogger(__name__)
 #config.read(os.path.join(os.path.dirname(__file__),'config.cfg'))
 input_image_file_ext = ".png"
 output_image_file_ext = ".tif"
+
 source_folder = os.environ.get('thermal_source_folder') #"/data/data/projects/thermal-image-processing/thermalimageprocessing/thermal_data"
 dest_folder = os.environ.get('thermal_destination_folder') #"/data/data/projects/thermal-image-processing/thermalimageprocessing/thermal_data_processing"
-postgis_table = decouple.config("general_postgis_table", default="NO DATABASE URL FOUND FOR THERMAL IMAGE PROCESSING.")
+
+raw_url = decouple.config("general_postgis_table", default="NO DATABASE URL FOUND FOR THERMAL IMAGE PROCESSING.")
+if raw_url:
+    # SQLAlchemy requires 'postgresql://' protocol, but Django often uses 'postgis://'.
+    # Replace 'postgis://' with 'postgresql://' to avoid NoSuchModuleError.
+    postgis_table = raw_url.replace('postgis://', 'postgresql://')
+else:
+    print("ERROR: general_postgis_table environment variable is not set.")
+    sys.exit(1) 
+
 logger.debug(f'postgis_table: {postgis_table}')
 azure_conn_string = os.environ.get('general_azure_conn_string') # config.get('general', 'azure_conn_string') 
 container_name = os.environ.get('general_container_name') # config.get('general', 'container_name')
