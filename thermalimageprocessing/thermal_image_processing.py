@@ -406,8 +406,10 @@ else:
         success = False
         msg += "\nMosaic production on kens-therm-001 failed"
         print("Mosaic production on kens-therm-001 failed")
+
     time.sleep(60)
     mosaic_pushed_to_azure = False
+
     try:
         push_to_azure(mosaic_image, flight_name + ".tif")
         msg += "\nMosaic pushed to Azure OK"
@@ -416,15 +418,19 @@ else:
     except:
         msg += "\nMosaic push to Azure failed"
         print("Mosaic push to Azure failed")
+
     try:
         create_mosaic_footprint_as_line(files, raw_img_folder, flight_timestamp, mosaic_image, engine, footprint)
         # NB this populates footprint.as_line and footprint.as_poly
         msg += "\nFootprint produced and pushed to PostGIS OK"
         print("Footprint produced and pushed to PostGIS OK")
-    except:
+    except Exception as e:
         success = False
         msg += "\nFootprint production or push to PostGIS failed"
-        print("Footprint production or push to PostGIS failed")
+        error_message = f"Footprint production or push to PostGIS failed: {e}"
+        print(error_message)
+        logger.error(error_message)
+
     try:
         get_footprint_districts(footprint)
         msg += "\nFootprint lies in district(s) " + str(footprint.districts)
@@ -433,6 +439,7 @@ else:
         success = False
         msg += "\nFootprint district(s) not found"
         print("Footprint district(s) not found")
+
     try:
         bboxes = create_img_bounding_boxes(files, raw_img_folder)
         msg += "\nBounding box creation for images OK"
@@ -441,6 +448,7 @@ else:
         success = False
         msg += "\nBounding box creation for images failed"
         print("Bounding box creation for images failed")
+
     try:
         all_images_with_hotspots = create_boundaries_and_centroids(flight_timestamp, kml_boundaries_file, bboxes, engine) # e.g. = ['000039.png', '000040.png', ... , '000106.png']
         if all_images_with_hotspots == []:
@@ -454,6 +462,7 @@ else:
         success = False
         msg += "\nBoundaries and centroids creation or push to PostGIS failed"
         print("Boundaries and centroids creation or push to PostGIS failed")
+
     try:
         if len(all_images_with_hotspots) > 0:
             for img in all_images_with_hotspots:
@@ -464,8 +473,10 @@ else:
     except:
         msg += "\nProduction of tif images failed"
         print("Production of tif images failed")
+
     # A cron job runs in Rancher every 5 min to update the file storage for geoserver; also allow extra time for processing - 10 min; later reduced to 1min
     time.sleep(60)
+
     try:
         if mosaic_pushed_to_azure:
             publish_image_on_geoserver(flight_name)
