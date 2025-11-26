@@ -11,6 +11,7 @@ import logging
 from osgeo import gdal
 import gdal_merge
 import gdal_edit
+import fiona
 from osgeo import ogr
 import geopandas as gpd
 import pandas as pd
@@ -219,7 +220,9 @@ def create_boundaries_and_centroids(flight_timestamp, kml_boundaries_file, bboxe
     try:
         # NB bboxes is a set of bounding boxes for each image (excluding the first, if exclude_first is True) gpd.io.file.fiona.drvsupport.supported_drivers['KML'] = 'rw' # Enables 
         # fiona KML driver
-        gpd.io.file.fiona.drvsupport.supported_drivers['LIBKML'] = 'rw' # Enables fiona KML driver
+        # gpd.io.file.fiona.drvsupport.supported_drivers['LIBKML'] = 'rw' # Enables fiona KML driver
+        # Use fiona directly to enable LIBKML driver support
+        fiona.drvsupport.supported_drivers['LIBKML'] = 'rw'    
         kml_boundaries = gpd.read_file(kml_boundaries_file)
         kml_boundaries['geometry'] = kml_boundaries.geometry.buffer(0)
         boundary_geometries = []
