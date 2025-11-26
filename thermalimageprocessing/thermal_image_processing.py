@@ -258,7 +258,8 @@ def create_boundaries_and_centroids(flight_timestamp, kml_boundaries_file, bboxe
         # Use fiona directly to enable LIBKML driver support
         fiona.drvsupport.supported_drivers['LIBKML'] = 'rw'    
         kml_boundaries = gpd.read_file(kml_boundaries_file)
-        kml_boundaries['geometry'] = kml_boundaries.geometry.buffer(0)
+        # kml_boundaries['geometry'] = kml_boundaries.geometry.buffer(0)
+        kml_boundaries['geometry'] = kml_boundaries.geometry.make_valid()
         boundary_geometries = []
         try:
             boundary_geometries = [geom for geom in kml_boundaries.unary_union.geoms]
@@ -492,11 +493,14 @@ else:
         for img in all_images_with_hotspots:
             img = img.replace(".png", ".tif")
             publish_image_on_geoserver(flight_name, img)
-    except:
+    except Exception as e:
         success = False
         msg += "\nMosaic publishing on geoserver failed"
-        print("Mosaic publishing on geoserver failed")
-     
+        # FIX: Print detailed error message
+        error_detail = f"Mosaic publishing on geoserver failed: {e}"
+        print(error_detail)
+        logger.error(error_detail) 
+
     # with open('./logs/' + flight_name + '.txt', 'w+') as fh:
     #     fh.write(msg)
     # Calculate absolute path to the logs folder
