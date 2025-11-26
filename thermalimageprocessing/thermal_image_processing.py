@@ -23,6 +23,11 @@ from azure.storage.blob import BlobServiceClient, BlobClient, ContainerClient
 
 logger = logging.getLogger(__name__)
 
+# Enable GDAL exceptions to catch errors like disk space failure in Python try-except blocks
+gdal.UseExceptions()
+# Disable disk space check to prevent "ERROR 3" (Not recommended for production but fixes the immediate issue)
+gdal.SetConfigOption('CHECK_DISK_FREE_SPACE', 'FALSE')
+
 # print(os.environ.get('KEY_THAT_MIGHT_EXIST', default_value))
 # os.environ.get('') #
 # Settings, could go to config file if neeeded
@@ -44,7 +49,7 @@ else:
     sys.exit(1) 
 
 logger.debug(f'postgis_table: {postgis_table}')
-azure_conn_string = os.environ.get('general_azure_conn_string') # config.get('general', 'azure_conn_string') 
+# azure_conn_string = os.environ.get('general_azure_conn_string') # config.get('general', 'azure_conn_string') 
 container_name = os.environ.get('general_container_name') # config.get('general', 'container_name')
 # blob_service_client = BlobServiceClient.from_connection_string(azure_conn_string)
 districts_dataset_name = os.environ.get('general_districts_dataset_name') # config.get('general', 'districts_dataset_name')
@@ -118,15 +123,38 @@ def get_exclude_first(files):
     return exclude_first
 
 def merge(files):
-    # Merges pngs and saves output to output_image specified above
-    gdal_merge_args = ["", "-o", mosaic_image, "-of", "GTiff", "-n", "0", "-a_nodata", "0"]
-    for file in files:
-        gdal_merge_args.append(file)
-    gdal_merge.main(gdal_merge_args)
+    print('in merge()...')
+
+    # # Merges pngs and saves output to output_image specified above
+    # gdal_merge_args = ["", "-o", mosaic_image, "-of", "GTiff", "-n", "0", "-a_nodata", "0"]
+    # for file in files:
+    #     gdal_merge_args.append(file)
+    # gdal_merge.main(gdal_merge_args)
+    # gdal_edit_args = ["", "-a_srs", "EPSG:28350", mosaic_image]
+    # #gdal_edit_args = ["", "-a_srs", "EPSG:4326", mosaic_image]
+    # gdal_edit.main(gdal_edit_args) # creates output image in 'Processed' folder
+    # #push_to_azure(mosaic_image, flight_name + ".tif")
+
+    # Merges PNGs and saves the output to the specified mosaic_image path.
+    # Using gdal.Warp instead of gdal_merge.main ensures better compatibility 
+    # between different GDAL versions (e.g., 3.0 vs 3.8) and offers better performance.
+    try:
+        gdal.Warp(
+            mosaic_image,       # Output file path
+            files,              # List of input files
+            format="GTiff",
+            srcNodata=0,        # Equivalent to -n 0
+            dstNodata=0,         # Equivalent to -a_nodata 0
+            options=["-co", "COMPRESS=DEFLATE"] # Compresses the output to save disk space
+        )
+    except Exception as e:
+        print(f"Merge failed: {e}")
+        raise
+
+    # Assign the projection (EPSG:28350) to the output image
     gdal_edit_args = ["", "-a_srs", "EPSG:28350", mosaic_image]
-    #gdal_edit_args = ["", "-a_srs", "EPSG:4326", mosaic_image]
-    gdal_edit.main(gdal_edit_args) # creates output image in 'Processed' folder
-    #push_to_azure(mosaic_image, flight_name + ".tif")
+    # gdal_edit_args = ["", "-a_srs", "EPSG:4326", mosaic_image]
+    gdal_edit.main(gdal_edit_args)
 
 def translate_png2tif(input_png, short_file):
     # Translates png to tif
