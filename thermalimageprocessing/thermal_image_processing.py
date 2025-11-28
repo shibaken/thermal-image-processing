@@ -182,7 +182,7 @@ def copy_to_geoserver_storage(source_file, relative_dest_path):
             os.makedirs(dest_dir, exist_ok=True)
         
         # Copy the image file to the destination
-        shutil.copy(source_file, dest_path)
+        shutil.copyfile(source_file, dest_path)
         
         # FIX: Change file permissions to 644 (Owner: RW, Group: R, Others: R)
         # This ensures the GeoServer container can read the file.
