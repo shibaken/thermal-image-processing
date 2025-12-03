@@ -319,7 +319,7 @@ def create_boundaries_and_centroids(flight_timestamp, kml_boundaries_file, bboxe
             # boundary_geometries = [geom for geom in kml_boundaries.unary_union.geoms]
             # The unary_union might result in a single geometry, not a list of geoms
             # It's safer to handle both cases
-            union_geom = kml_boundaries.unary_union
+            union_geom = kml_boundaries.union_all()
             if union_geom.geom_type in ('MultiPolygon', 'GeometryCollection'):
                 boundary_geometries = list(union_geom.geoms)
             else:
