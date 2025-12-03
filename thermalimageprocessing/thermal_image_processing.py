@@ -434,6 +434,10 @@ def publish_image_on_geoserver(flight_name, image_name=None):
             success_message = 'Great success! Layer published on GeoServer.'
             logger.info(success_message)
             print(success_message)
+        elif response.status_code == 500 and "already exists" in response.text:
+            success_message = 'Layer already exists on GeoServer (Status 500). Skipping.'
+            logger.info(success_message)
+            print(success_message)
         else:
             error_msg = f"Error GeoServer Layer Publish. Status: {response.status_code}"
             logger.error(error_msg)
