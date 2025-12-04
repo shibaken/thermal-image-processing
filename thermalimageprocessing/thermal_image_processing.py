@@ -7,10 +7,10 @@ import requests
 import time
 import decouple
 import logging
+import django
 #import gdal
 from osgeo import gdal
-import gdal_merge
-import gdal_edit
+from thermalimageprocessing import gdal_edit
 import fiona
 from osgeo import ogr
 import geopandas as gpd
@@ -21,6 +21,12 @@ from sqlalchemy import create_engine
 from postmarker.core import PostmarkClient
 from azure.storage.blob import BlobServiceClient, BlobClient, ContainerClient
 from shapely.geometry import shape, mapping
+
+current_dir = os.path.dirname(os.path.abspath(__file__))
+parent_dir = os.path.dirname(current_dir)
+sys.path.append(parent_dir)
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'tipapp.settings')
+django.setup()
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +54,7 @@ if raw_url:
     # Replace 'postgis://' with 'postgresql://' to avoid NoSuchModuleError.
     postgis_table = raw_url.replace('postgis://', 'postgresql://')
 else:
-    print("ERROR: general_postgis_table environment variable is not set.")
+    logger.error("ERROR: general_postgis_table environment variable is not set.")
     sys.exit(1) 
 
 logger.debug(f'postgis_table: {postgis_table}')
@@ -125,14 +131,18 @@ def get_exclude_first(files):
         exclude_first = False
     return exclude_first
 
-def merge(files):
-    print('in merge()...')
+def merge(files, output_path):
     # Merges PNGs and saves the output to the specified mosaic_image path.
     # Using gdal.Warp instead of gdal_merge.main ensures better compatibility 
     # between different GDAL versions (e.g., 3.0 vs 3.8) and offers better performance.
+    file_count = len(files)
+    output_name = os.path.basename(output_path)
+    msg = f"Merging {file_count} input files into: {output_name}..."
+    logger.info(msg)
+
     try:
         gdal.Warp(
-            mosaic_image,       # Output file path
+            output_path,       # Output file path
             files,              # List of input files
             format="GTiff",
             srcNodata=0,        # Equivalent to -n 0
@@ -143,11 +153,10 @@ def merge(files):
         # Log the error with stack trace for debugging
         logger.error(f"Merge failed: {e}", exc_info=True)
         # Also print to stdout so it appears in the subprocess runner's log
-        print(f"Merge failed: {e}")
         raise
 
     # Assign the projection (EPSG:28350) to the output image
-    gdal_edit_args = ["", "-a_srs", "EPSG:28350", mosaic_image]
+    gdal_edit_args = ["", "-a_srs", "EPSG:28350", output_path]
     # gdal_edit_args = ["", "-a_srs", "EPSG:4326", mosaic_image]
     gdal_edit.main(gdal_edit_args)
 
@@ -165,16 +174,24 @@ def copy_to_geoserver_storage(source_file, relative_dest_path):
     Copies the processed image file to the shared storage mount for GeoServer.
     """
     try:
-        # Log start of operation
-        logger.info(f"Copying file to GeoServer storage. Source: {source_file}, Dest Relative: {relative_dest_path}")
-
         # Define the target base path
         mount_base_path = "/rclone-mounts/thermalimaging-flightmosaics"
         
         # Construct the full destination path
         # blob_name is used here as the relative path (e.g., 'FlightName.tif' or 'FlightName_images/xxx.tif')
         dest_path = os.path.join(mount_base_path, relative_dest_path)
-        
+
+        try:
+            file_size = os.path.getsize(source_file)
+            file_size_mb = file_size / (1024 * 1024) # Convert to MB
+            logger.info(f"Copying file ({file_size_mb:.2f} MB) to GeoServer storage...")
+        except OSError:
+            # Handle cases where file might not exist yet (though unlikely here)
+            logger.warning(f"Copying file to GeoServer storage (Size unknown).")
+
+        logger.info(f"Source: {source_file}")
+        logger.info(f"Destination: {dest_path}")
+
         # Extract the directory path
         dest_dir = os.path.dirname(dest_path)
         
@@ -184,17 +201,13 @@ def copy_to_geoserver_storage(source_file, relative_dest_path):
         
         # Copy the image file to the destination
         shutil.copyfile(source_file, dest_path)
-        
-        # FIX: Change file permissions to 644 (Owner: RW, Group: R, Others: R)
-        # This ensures the GeoServer container can read the file.
-        # os.chmod(dest_path, 0o644)
+
+        logger.info(f"Copy complete.") 
         
     except Exception as e:
         error_msg = f"Failed to copy file to rclone mount: {e}"
         # Log the error with full stack trace
         logger.error(error_msg, exc_info=True)
-        # Print to stdout so ImportsProcessor can also capture it
-        print(error_msg)
 
 
 def create_mosaic_footprint_as_line(files, raw_img_folder, flight_timestamp, image, engine, footprint):
@@ -409,272 +422,336 @@ def publish_image_on_geoserver(flight_name, image_name=None):
     # --- Create Coverage Store ---
     try:
         response = requests.post(gs_url_base, headers=headers, data=store_data, auth=(user, gs_pwd))
-        if response.status_code == 201:
-            logger.info("Coverage Store created successfully.")
+        if response.status_code in [200, 201]:
+            logger.info(f"Coverage Store created successfully. (Status {response.status_code})")
         elif response.status_code == 500 and "already exists" in response.text:
             # Not strictly an error if we are updating or reprocessing
             logger.info(f"Coverage Store already exists. Status: {response.status_code}")
         else:
             logger.error(f"Failed to create Coverage Store. Status: {response.status_code}, Response: {response.text}")
-            print(f"Error creating Store: {response.status_code}")
     except Exception as e:
         logger.error(f"Exception during Coverage Store creation: {e}", exc_info=True)
-        print(f"Exception: {e}")
-
+    
     if image_name is None:
-        layer_data = '<coverage><name>{flight_name}</name><title>{flight_name}</title><srs>EPSG:28350</srs></coverage>'.format(flight_name=flight_name)
+        target_layer_name = flight_name
     else:
-        layer_data = '<coverage><name>{flight_timestamp}_img_{image}</name><title>{flight_timestamp}_img_{image}</title><srs>EPSG:28350</srs></coverage>'.format(flight_timestamp=flight_timestamp, image=image_name[:-4])
+        # e.g. 20231214_..._img_00001
+        target_layer_name = f"{flight_timestamp}_img_{image_name[:-4]}"
+
+    layer_data = f'<coverage><name>{target_layer_name}</name><title>{target_layer_name}</title><srs>EPSG:28350</srs></coverage>'
 
     # --- Create/Publish Layer ---
     try:
         response = requests.post(gs_layer_url, headers=headers, data=layer_data, auth=(user, gs_pwd))
 
         if response.status_code == 201:
-            success_message = 'Great success! Layer published on GeoServer.'
+            success_message = f'Great success! Layer published on GeoServer: {target_layer_name}.'
             logger.info(success_message)
-            print(success_message)
         elif response.status_code == 500 and "already exists" in response.text:
-            success_message = 'Layer already exists on GeoServer (Status 500). Skipping.'
+            success_message = f'Layer already exists on GeoServer (Status 500). Skipping: {target_layer_name}.'
             logger.info(success_message)
-            print(success_message)
         else:
-            error_msg = f"Error GeoServer Layer Publish. Status: {response.status_code}"
+            error_msg = f"Error GeoServer Layer Publish for {target_layer_name}. Status: {response.status_code}"
             logger.error(error_msg)
             logger.error(f"Response: {response.text}")
-            print(error_msg)
             print(f"Response: {response.text}")
     except Exception as e:
         error_msg = f"Exception during Layer publication: {e}"
         logger.error(error_msg, exc_info=True)
-        print(error_msg)
+
+def unzip_and_prepare(full_filename_path, uploads_folder_path):
+    """
+    Handles file preparation: copying, moving, and unzipping.
+    Replaces the functionality of the shell script.
+    """
+    # Get the base directory of the project
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    
+    filename = os.path.basename(full_filename_path)
+    
+    # Logic to determine directory name (Removing extension and timestamp)
+    basename_without_ext = os.path.splitext(filename)[0]
+    # Assuming format Name.timestamp -> Name
+    dirname = os.path.splitext(basename_without_ext)[0]
+
+    logger.info(f"Preparing to process: {filename}")
+    logger.info(f"Target directory name: {dirname}")
+
+    # Define processing directory
+    processing_base_folder = os.path.join(base_dir, 'thermal_data_processing')
+    if not os.path.exists(processing_base_folder):
+        os.makedirs(processing_base_folder)
+
+    # Path for the temporary 7z file in processing folder
+    target_7z_path = os.path.join(processing_base_folder, filename)
+
+    # 1. Copy file to processing folder
+    logger.info(f"Copying {full_filename_path} to {target_7z_path}")
+    shutil.copy2(full_filename_path, target_7z_path)
+
+    # 2. Move original file to uploads history folder
+    # Ensure uploads_folder_path is absolute
+    if not os.path.isabs(uploads_folder_path):
+        uploads_folder_path = os.path.join(base_dir, uploads_folder_path)
+    
+    dest_move_path = os.path.join(uploads_folder_path, filename)
+    logger.info(f"Moving original file to {dest_move_path}")
+    
+    if not os.path.exists(uploads_folder_path):
+         os.makedirs(uploads_folder_path, exist_ok=True)
+         
+    shutil.move(full_filename_path, dest_move_path)
+
+    # 3. Unzip using 7z
+    logger.info(f"Uncompressing {filename}...")
+    try:
+        # -aoa: Overwrite All existing files without prompt
+        subprocess.run(
+            ['7z', 'x', target_7z_path, '-aoa'],
+            cwd=processing_base_folder, # Execute inside thermal_data_processing
+            check=True,
+            capture_output=True
+        )
+    except subprocess.CalledProcessError as e:
+        logger.error(f"7z extraction failed: {e.stderr.decode()}")
+        raise
+
+    # 4. Remove the temporary .7z file
+    os.remove(target_7z_path)
+
+    # Return the full path to the extracted directory
+    return os.path.join(processing_base_folder, dirname)
 
 
-##############################################################################
-# MAIN PROCESS In response to new zipfile in source folder, create destination folder
+# =========================================================
+# Main processing logic wrapper
+# =========================================================
+def run_thermal_processing(flight_path_arg):
+    """
+    Main entry point for thermal image processing.
+    """
+    # Make these variables available globally so other functions 
+    # (like create_boundaries_and_centroids) can access them.
+    global flight_name, output_geopackage, output_folder
 
-# Argument is now the full path, e.g., /data/.../FireFlight_2024...
-flight_path_arg = sys.argv[1]
-# Extract just the folder name (FireFlight_...)
-flight_name = os.path.basename(flight_path_arg)
-flight_timestamp = flight_name.replace("FireFlight_", "")
-# The argument passed is already the main folder path
-main_folder = flight_path_arg
+    # Argument is now the full path
+    flight_name = os.path.basename(flight_path_arg)
+    flight_timestamp = flight_name.replace("FireFlight_", "")
+    main_folder = flight_path_arg
 
-# Set filepaths and a couple of other settings
-raw_img_folder = os.path.join(main_folder, "PNGs/CAMERA1")
-output_folder = os.path.join(main_folder, "Processed")
-mosaic_image = os.path.join(output_folder, flight_name + "_mosaic" + output_image_file_ext)
-footprint = Footprint()
-kml_boundaries_folder = os.path.join(main_folder, "KML Boundaries/CAMERA1")
-kml_boundaries_file =""
-
-# --- Log: Start Process ---
-start_msg = f"=== STARTING PROCESSING FOR: {flight_name} ==="
-logger.info(start_msg)
-print(start_msg)
-
-logger.info(f"Looking for KML in: {kml_boundaries_folder}")
-for filename in os.listdir(kml_boundaries_folder):
-    if "supermosaic_" in filename.lower() and filename.lower().endswith("bnd.kml"):
-        kml_boundaries_file = os.path.join(kml_boundaries_folder, filename)
-        break
-if kml_boundaries_file == "":
-    for filename in os.listdir(kml_boundaries_folder):
-        if filename.lower() == "mosaic_0_0_bnd.kml":
-            kml_boundaries_file = os.path.join(kml_boundaries_folder, filename)
-            break
-if kml_boundaries_file == "":
-    send_notification_emails(flight_name, False, "No file named *SuperMosaic*BND.kml found in KML Boundaries folder")
-else:
-    engine = create_engine(postgis_table)
+    # Set filepaths
+    raw_img_folder = os.path.join(main_folder, "PNGs/CAMERA1")
+    output_folder = os.path.join(main_folder, "Processed")
+    mosaic_image = os.path.join(output_folder, flight_name + "_mosaic" + output_image_file_ext)
+    footprint = Footprint()
+    kml_boundaries_folder = os.path.join(main_folder, "KML Boundaries/CAMERA1")
+    kml_boundaries_file =""
     output_geopackage = os.path.join(output_folder, "output.gpkg")
-    exclude_first = None
-    files = [os.path.join(raw_img_folder, f) for f in os.listdir(raw_img_folder) if f.endswith(input_image_file_ext)]
-    files.sort()
-    exclude_first = get_exclude_first(files)
-    if exclude_first:
-        files.remove(files[0])
-    if not os.path.exists(output_folder):
-        os.makedirs(output_folder)
-    success = True
-    global msg
-    msg = ""
-    all_images_with_hotspots = []
-    try:
-        # --- Log: Mosaic Creation ---
-        logger.info(">>> Step 1/8: Creating Mosaic Image (gdal.Warp)...")
-        print(">>> Step 1/8: Creating Mosaic Image...")
 
-        merge(files)
-        msg += "\nMosaic produced OK"
-        print("Mosaic produced OK")
-        logger.info("Mosaic produced OK")
-    except Exception as e:
-        success = False
-        error_message = f"Mosaic production failed: {e}"
-        msg += "\n" + error_message
-        print(error_message)
-        logger.error(error_message, exc_info=True)
-
-    time.sleep(60)
-    mosaic_stored_ok = False
-
-    try:
-        # --- Log: File Copy/Upload ---
-        logger.info(">>> Step 2/8: Copying Mosaic to GeoServer Storage...")
-        print(">>> Step 2/8: Copying Mosaic to GeoServer Storage...")
-
-        copy_to_geoserver_storage(mosaic_image, flight_name + ".tif")
-        msg += "\nMosaic pushed to GeoServer storage OK"
-        print("Mosaic pushed to GeoServer storage OK")
-        logger.info("Mosaic pushed to GeoServer storage OK") # Add log
-        mosaic_stored_ok = True
-    except Exception as e:
-        error_message = f"Mosaic copy/upload failed: {e}"
-        msg += "\n" + error_message
-        print(error_message)
-        logger.error(error_message, exc_info=True)
-
-    try:
-        # --- Log: Footprint Creation ---
-        logger.info(">>> Step 3/8: Creating Footprint and pushing to PostGIS...")
-        print(">>> Step 3/8: Creating Footprint...")
-
-        create_mosaic_footprint_as_line(files, raw_img_folder, flight_timestamp, mosaic_image, engine, footprint)
-        # NB this populates footprint.as_line and footprint.as_poly
-        success_msg = "Footprint produced and pushed to PostGIS OK"
-        msg += "\n" + success_msg
-        print(success_msg)
-        logger.info(success_msg) 
-    except Exception as e:
-        success = False
-        msg += "\nFootprint production or push to PostGIS failed"
-        error_message = f"Footprint production or push to PostGIS failed: {e}"
-        print(error_message)
-        logger.error(error_message)
-
-    try:
-        # --- Log: District Check ---
-        logger.info(">>> Step 4/8: Checking Districts...")
-        print(">>> Step 4/8: Checking Districts...")
-
-        get_footprint_districts(footprint)
-        success_msg = "Footprint lies in district(s) " + str(footprint.districts)
-        msg += "\n" + success_msg
-        print(success_msg)
-        logger.info(success_msg)
-    except Exception as e:
-        success = False
-        error_message = f"Footprint district(s) not found: {e}"
-        msg += "\n" + error_message
-        print(error_message)
-        logger.error(error_message, exc_info=True)
-
-    try:
-        # --- Log: Bounding Boxes ---
-        logger.info(">>> Step 5/8: Creating Image Bounding Boxes...")
-        print(">>> Step 5/8: Creating Image Bounding Boxes...")
-
-        bboxes = create_img_bounding_boxes(files, raw_img_folder)
-        success_msg = "Bounding box creation for images OK"
-        msg += "\n" + success_msg
-        print(success_msg)
-        logger.info(success_msg)
-    except Exception as e:
-        success = False
-        error_message = f"Bounding box creation for images failed: {e}"
-        msg += "\n" + error_message
-        print(error_message)
-        logger.error(error_message, exc_info=True)
-
-    try:
-        # --- Log: Hotspot Analysis ---
-        logger.info(">>> Step 6/8: Analyzing Hotspots (Intersects)...")
-        print(">>> Step 6/8: Analyzing Hotspots...")
-
-        all_images_with_hotspots = create_boundaries_and_centroids(flight_timestamp, kml_boundaries_file, bboxes, engine) # e.g. = ['000039.png', '000040.png', ... , '000106.png']
-        if all_images_with_hotspots == []:
-            success_msg = "NO HOTSPOTS FOUND!!!"
-            msg += "\n" + success_msg
-            print(success_msg)
-            logger.info(success_msg)
-            #success = False
-        else:
-            success_msg = "Boundaries and centroids creation and push to PostGIS OK"
-            msg += "\n" + success_msg
-            print(success_msg)
-            logger.info(success_msg)
-    except Exception as e:
-            success = False
-            error_message = f"Boundaries and centroids creation or push to PostGIS failed: {e}"
-            msg += "\n" + error_message
-            print(error_message)
-            logger.error(error_message, exc_info=True)
-
-    try:
-        # --- Log: Image Conversion ---
-        count = len(all_images_with_hotspots)
-        logger.info(f">>> Step 7/8: Converting {count} Hotspot Images (PNG to TIF)...")
-        print(f">>> Step 7/8: Converting {count} Hotspot Images...")
-
-        if len(all_images_with_hotspots) > 0:
-            for img in all_images_with_hotspots:
-                full_path = os.path.join(raw_img_folder, img)
-                translate_png2tif(full_path, img)
-            success_msg = "Production of tif images OK"
-            msg += "\n" + success_msg
-            print(success_msg)
-            logger.info(success_msg)
-    except Exception as e:
-        msg += "\nProduction of tif images failed"
-        print("Production of tif images failed")
-        error_detail = f"Production of tif images failed: {e}"
-        print(error_detail)
-        logger.error(error_detail) 
-
-    # A cron job runs in Rancher every 5 min to update the file storage for geoserver; also allow extra time for processing - 10 min; later reduced to 1min
-    time.sleep(60)
-
-    try:
-        # --- Log: GeoServer Publishing ---
-        logger.info(">>> Step 8/8: Publishing to GeoServer...")
-        print(">>> Step 8/8: Publishing to GeoServer...")
-
-        if mosaic_stored_ok:
-            publish_image_on_geoserver(flight_name)
-            success_msg = "Mosaic published on geoserver OK"
-            msg += "\n" + success_msg
-            print(success_msg)
-            logger.info(success_msg)
-        else:
-            error_message = "Mosaic could not be published on geoserver!!!"
-            msg += "\n" + error_message
-            print(error_message)
-            logger.info(error_message)
-
-        for img in all_images_with_hotspots:
-            img = img.replace(".png", ".tif")
-            publish_image_on_geoserver(flight_name, img)
-    except Exception as e:
-        success = False
-        msg += "\nMosaic publishing on geoserver failed"
-        error_detail = f"Mosaic publishing on geoserver failed: {e}"
-        print(error_detail)
-        logger.error(error_detail) 
-
+    # =========================================================
+    # FIX: Dynamically add a FileHandler for this specific flight
+    # =========================================================
     base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     logs_folder = os.path.join(base_dir, 'logs')
-
-    # Ensure the folder exists just in case
     if not os.path.exists(logs_folder):
         os.makedirs(logs_folder)
 
-    # Write log file
-    with open(os.path.join(logs_folder, flight_name + '.txt'), 'w+') as fh:
-        fh.write(msg)
+    log_file_path = os.path.join(logs_folder, flight_name + '.txt')
 
-    # --- Log: Finish ---
-    end_msg = f"=== FINISHED PROCESSING FOR: {flight_name} ==="
-    logger.info(end_msg)
-    print(end_msg)
+    file_handler = logging.FileHandler(log_file_path)
+    file_handler.setLevel(logging.INFO)
+    formatter = logging.Formatter("%(levelname)s %(asctime)s %(name)s [Line:%(lineno)s][%(funcName)s] %(message)s")
+    file_handler.setFormatter(formatter)
+    logger.addHandler(file_handler)
+
+    # --- Log: Start Process ---
+    start_msg = f"=== STARTING PROCESSING FOR: {flight_name} ==="
+    logger.info(start_msg)
+
+    logger.info(f"Looking for KML in: {kml_boundaries_folder}")
+    if os.path.exists(kml_boundaries_folder):
+        for filename in os.listdir(kml_boundaries_folder):
+            if "supermosaic_" in filename.lower() and filename.lower().endswith("bnd.kml"):
+                kml_boundaries_file = os.path.join(kml_boundaries_folder, filename)
+                break
+        if kml_boundaries_file == "":
+            for filename in os.listdir(kml_boundaries_folder):
+                if filename.lower() == "mosaic_0_0_bnd.kml":
+                    kml_boundaries_file = os.path.join(kml_boundaries_folder, filename)
+                    break
+    
+    if kml_boundaries_file == "":
+        send_notification_emails(flight_name, False, "No file named *SuperMosaic*BND.kml found in KML Boundaries folder")
+    else:
+        engine = create_engine(postgis_table)
+        
+        exclude_first = None
+        if os.path.exists(raw_img_folder):
+            files = [os.path.join(raw_img_folder, f) for f in os.listdir(raw_img_folder) if f.endswith(input_image_file_ext)]
+            files.sort()
+            exclude_first = get_exclude_first(files)
+            if exclude_first:
+                files.remove(files[0])
+        else:
+            logger.error(f"Raw image folder not found: {raw_img_folder}")
+            files = []
+
+        if not os.path.exists(output_folder):
+            os.makedirs(output_folder)
+        
+        success = True
+        global msg
+        msg = ""
+        all_images_with_hotspots = []
+        mosaic_stored_ok = False
+
+        try:
+            # --- Log: Mosaic Creation ---
+            logger.info(">>> Step 1/8: Creating Mosaic Image (gdal.Warp)...")
+            
+            # Pass output path explicitly
+            merge(files, mosaic_image)
+            msg += "\nMosaic produced OK"
+            logger.info("Mosaic produced OK")
+        except Exception as e:
+            success = False
+            error_message = f"Mosaic production failed: {e}"
+            msg += "\n" + error_message
+            logger.error(error_message, exc_info=True)
+
+        # Wait a bit
+        time.sleep(10)
+
+        try:
+            # --- Log: File Copy/Upload ---
+            logger.info(">>> Step 2/8: Copying Mosaic to GeoServer Storage...")
+            
+            copy_to_geoserver_storage(mosaic_image, flight_name + ".tif")
+            msg += "\nMosaic pushed to GeoServer storage OK"
+            logger.info("Mosaic pushed to GeoServer storage OK")
+            mosaic_stored_ok = True
+        except Exception as e:
+            error_message = f"Mosaic copy/upload failed: {e}"
+            msg += "\n" + error_message
+            logger.error(error_message, exc_info=True)
+
+        try:
+            # --- Log: Footprint Creation ---
+            logger.info(">>> Step 3/8: Creating Footprint and pushing to PostGIS...")
+            
+            create_mosaic_footprint_as_line(files, raw_img_folder, flight_timestamp, mosaic_image, engine, footprint)
+            success_msg = "Footprint produced and pushed to PostGIS OK"
+            msg += "\n" + success_msg
+            logger.info(success_msg) 
+        except Exception as e:
+            success = False
+            msg += "\nFootprint production or push to PostGIS failed"
+            error_message = f"Footprint production or push to PostGIS failed: {e}"
+            logger.error(error_message)
+
+        try:
+            # --- Log: District Check ---
+            logger.info(">>> Step 4/8: Checking Districts...")
+            
+            get_footprint_districts(footprint)
+            success_msg = "Footprint lies in district(s) " + str(footprint.districts)
+            msg += "\n" + success_msg
+            logger.info(success_msg)
+        except Exception as e:
+            success = False
+            error_message = f"Footprint district(s) not found: {e}"
+            msg += "\n" + error_message
+            logger.error(error_message, exc_info=True)
+
+        try:
+            # --- Log: Bounding Boxes ---
+            logger.info(">>> Step 5/8: Creating Image Bounding Boxes...")
+            
+            bboxes = create_img_bounding_boxes(files, raw_img_folder)
+            success_msg = "Bounding box creation for images OK"
+            msg += "\n" + success_msg
+            logger.info(success_msg)
+        except Exception as e:
+            success = False
+            error_message = f"Bounding box creation for images failed: {e}"
+            msg += "\n" + error_message
+            logger.error(error_message, exc_info=True)
+
+        try:
+            # --- Log: Hotspot Analysis ---
+            logger.info(">>> Step 6/8: Analyzing Hotspots (Intersects)...")
+            
+            all_images_with_hotspots = create_boundaries_and_centroids(flight_timestamp, kml_boundaries_file, bboxes, engine)
+            if all_images_with_hotspots == []:
+                success_msg = "NO HOTSPOTS FOUND!!!"
+                msg += "\n" + success_msg
+                logger.info(success_msg)
+            else:
+                success_msg = "Boundaries and centroids creation and push to PostGIS OK"
+                msg += "\n" + success_msg
+                logger.info(success_msg)
+        except Exception as e:
+                success = False
+                error_message = f"Boundaries and centroids creation or push to PostGIS failed: {e}"
+                msg += "\n" + error_message
+                logger.error(error_message, exc_info=True)
+
+        try:
+            # --- Log: Image Conversion ---
+            count = len(all_images_with_hotspots)
+            logger.info(f">>> Step 7/8: Converting {count} Hotspot Images (PNG to TIF)...")
+            
+            if len(all_images_with_hotspots) > 0:
+                for img in all_images_with_hotspots:
+                    full_path = os.path.join(raw_img_folder, img)
+                    translate_png2tif(full_path, img)
+                success_msg = "Production of tif images OK"
+                msg += "\n" + success_msg
+                logger.info(success_msg)
+        except Exception as e:
+            msg += "\nProduction of tif images failed"
+            error_detail = f"Production of tif images failed: {e}"
+            logger.error(error_detail) 
+
+        # Wait for storage sync
+        time.sleep(60)
+
+        try:
+            # --- Log: GeoServer Publishing ---
+            logger.info(">>> Step 8/8: Publishing to GeoServer...")
+            
+            if mosaic_stored_ok:
+                publish_image_on_geoserver(flight_name)
+                success_msg = "Mosaic published on geoserver OK"
+                msg += "\n" + success_msg
+                logger.info(success_msg)
+            else:
+                error_message = "Mosaic could not be published on geoserver!!!"
+                msg += "\n" + error_message
+                logger.info(error_message)
+
+            for img in all_images_with_hotspots:
+                img = img.replace(".png", ".tif")
+                publish_image_on_geoserver(flight_name, img)
+        except Exception as e:
+            success = False
+            msg += "\nMosaic publishing on geoserver failed"
+            error_detail = f"Mosaic publishing on geoserver failed: {e}"
+            logger.error(error_detail) 
+
+        # --- Log: Finish ---
+        end_msg = f"=== FINISHED PROCESSING FOR: {flight_name} ==="
+        logger.info(end_msg)
+
+
+# =========================================================
+# Legacy Support: Allows running from command line (like .sh)
+# =========================================================
+if __name__ == "__main__":
+    if len(sys.argv) < 2:
+        print("Usage: python thermal_image_processing.py <flight_data_path>")
+        sys.exit(1)
+        
+    # If run directly from command line (legacy .sh style), 
+    # we assume the path provided is already prepared/unzipped.
+    run_thermal_processing(sys.argv[1])

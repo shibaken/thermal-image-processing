@@ -17,6 +17,17 @@
             "django": true,
             "autoStartBrowser": false,
 
+        },
+        {
+            "name": "Debug: Process Imported Files",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/manage.py",
+            "python": "${workspaceFolder}/venv/bin/python",
+            "args": [
+                "process_imported_files_command"
+            ],
+            "django": true
         }
     ]
 }

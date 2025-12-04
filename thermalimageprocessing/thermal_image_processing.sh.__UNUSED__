@@ -49,7 +49,7 @@ rm $basename_filename
 echo $dirname
 echo "Run pythonscript"
 
-python $folder_path/thermalimageprocessing/thermal_image_processing.py  $folder_path/thermal_data_processing/$dirname
+python -u $folder_path/thermalimageprocessing/thermal_image_processing.py  $folder_path/thermal_data_processing/$dirname
 
 end_timestamp=$(date +"%Y-%m-%d_%H:%M:%S")
 printf "\n%s %s done" "$end_timestamp" "$dirname"  >> "$LOG_FILE"
