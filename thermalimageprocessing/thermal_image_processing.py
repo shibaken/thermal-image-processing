@@ -126,10 +126,15 @@ def get_exclude_first(files):
     return exclude_first
 
 def merge(files):
-    print('in merge()...')
     # Merges PNGs and saves the output to the specified mosaic_image path.
     # Using gdal.Warp instead of gdal_merge.main ensures better compatibility 
     # between different GDAL versions (e.g., 3.0 vs 3.8) and offers better performance.
+    file_count = len(files)
+    output_name = os.path.basename(mosaic_image)
+    msg = f"Merging {file_count} input files into: {output_name}..."
+    logger.info(msg)
+    print(msg)
+
     try:
         gdal.Warp(
             mosaic_image,       # Output file path
