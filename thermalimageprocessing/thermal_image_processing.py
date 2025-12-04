@@ -7,6 +7,7 @@ import requests
 import time
 import decouple
 import logging
+import django
 #import gdal
 from osgeo import gdal
 import gdal_merge
@@ -21,6 +22,12 @@ from sqlalchemy import create_engine
 from postmarker.core import PostmarkClient
 from azure.storage.blob import BlobServiceClient, BlobClient, ContainerClient
 from shapely.geometry import shape, mapping
+
+current_dir = os.path.dirname(os.path.abspath(__file__))
+parent_dir = os.path.dirname(current_dir)
+sys.path.append(parent_dir)
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'tipapp.settings')
+django.setup()
 
 logger = logging.getLogger(__name__)
 
