@@ -160,7 +160,7 @@ def merge(files, output_path):
     # gdal_edit_args = ["", "-a_srs", "EPSG:4326", mosaic_image]
     gdal_edit.main(gdal_edit_args)
 
-def translate_png2tif(input_png, short_file):
+def translate_png2tif(input_png, short_file, flight_name):
     # Translates png to tif
     output_tif = input_png.replace(".png", ".tif")
     tif_filename = short_file.replace(".png", ".tif")
@@ -532,7 +532,7 @@ def run_thermal_processing(flight_path_arg):
     """
     # Make these variables available globally so other functions 
     # (like create_boundaries_and_centroids) can access them.
-    global flight_name, output_geopackage, output_folder
+    global output_geopackage, output_folder
 
     # Argument is now the full path
     flight_name = os.path.basename(flight_path_arg)
@@ -704,7 +704,7 @@ def run_thermal_processing(flight_path_arg):
             if len(all_images_with_hotspots) > 0:
                 for img in all_images_with_hotspots:
                     full_path = os.path.join(raw_img_folder, img)
-                    translate_png2tif(full_path, img)
+                    translate_png2tif(full_path, img, flight_name)
                 success_msg = "Production of tif images OK"
                 msg += "\n" + success_msg
                 logger.info(success_msg)
