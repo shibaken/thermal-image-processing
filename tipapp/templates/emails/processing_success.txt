@@ -1,0 +1,13 @@
+Hello,
+
+The thermal image processing for flight {{ flight_name }} has completed successfully.
+
+--- Processing Summary ---
+{{ details_message }}
+--------------------------
+
+The data should now be available in the system.
+
+
+Thank you,
+The Thermal Image Processing System
