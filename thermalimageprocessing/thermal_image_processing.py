@@ -576,26 +576,22 @@ def run_thermal_processing(flight_path_arg):
     msg = ""        # This will accumulate messages for the success email.
     error_details = "" # This will store the specific error for the failure email.
 
-    logger.info(f"Looking for KML in: {kml_boundaries_folder}")
-    if os.path.exists(kml_boundaries_folder):
-        for filename in os.listdir(kml_boundaries_folder):
-            if "supermosaic_" in filename.lower() and filename.lower().endswith("bnd.kml"):
-                kml_boundaries_file = os.path.join(kml_boundaries_folder, filename)
-                break
-        if kml_boundaries_file == "":
+    try:
+        logger.info(f"Looking for KML in: {kml_boundaries_folder}")
+        if os.path.exists(kml_boundaries_folder):
             for filename in os.listdir(kml_boundaries_folder):
-                if filename.lower() == "mosaic_0_0_bnd.kml":
+                if "supermosaic_" in filename.lower() and filename.lower().endswith("bnd.kml"):
                     kml_boundaries_file = os.path.join(kml_boundaries_folder, filename)
                     break
-    
-    if kml_boundaries_file == "":
-        # send_notification_emails(flight_name, False, "No file named *SuperMosaic*BND.kml found in KML Boundaries folder")
-        logger.error("No KML boundary file found. Processing will be marked as failed.")
-        # Set up variables for the finally block
-        success = False
-        error_details = "Critical Error: No file named *SuperMosaic*BND.kml found in KML Boundaries folder."
-        msg = error_details
-    else:
+            if kml_boundaries_file == "":
+                for filename in os.listdir(kml_boundaries_folder):
+                    if filename.lower() == "mosaic_0_0_bnd.kml":
+                        kml_boundaries_file = os.path.join(kml_boundaries_folder, filename)
+                        break
+        
+        if kml_boundaries_file == "":
+            raise FileNotFoundError("Critical Error: No file named *SuperMosaic*BND.kml found in KML Boundaries folder.")
+
         engine = create_engine(postgis_table)
         
         exclude_first = None
@@ -606,8 +602,8 @@ def run_thermal_processing(flight_path_arg):
             if exclude_first:
                 files.remove(files[0])
         else:
-            logger.error(f"Raw image folder not found: {raw_img_folder}")
-            files = []
+            # Raise an error if the image folder is missing.
+            raise FileNotFoundError(f"Raw image folder not found: {raw_img_folder}")
 
         if not os.path.exists(output_folder):
             os.makedirs(output_folder)
@@ -617,35 +613,22 @@ def run_thermal_processing(flight_path_arg):
         all_images_with_hotspots = []
         mosaic_stored_ok = False
 
-        try:
-            # --- Log: Mosaic Creation ---
-            logger.info(">>> Step 1/8: Creating Mosaic Image (gdal.Warp)...")
-            
-            # Pass output path explicitly
-            merge(files, mosaic_image)
-            msg += "\nMosaic produced OK"
-            logger.info("Mosaic produced OK")
-        except Exception as e:
-            success = False
-            error_message = f"Mosaic production failed: {e}"
-            msg += "\n" + error_message
-            logger.error(error_message, exc_info=True)
+        # --- Log: Mosaic Creation ---
+        logger.info(">>> Step 1/8: Creating Mosaic Image (gdal.Warp)...")
+        # Pass output path explicitly
+        merge(files, mosaic_image)
+        msg += "\nMosaic produced OK"
+        logger.info("Mosaic produced OK")
 
         # Wait a bit
         time.sleep(10)
 
-        try:
-            # --- Log: File Copy/Upload ---
-            logger.info(">>> Step 2/8: Copying Mosaic to GeoServer Storage...")
-            
-            copy_to_geoserver_storage(mosaic_image, flight_name + ".tif")
-            msg += "\nMosaic pushed to GeoServer storage OK"
-            logger.info("Mosaic pushed to GeoServer storage OK")
-            mosaic_stored_ok = True
-        except Exception as e:
-            error_message = f"Mosaic copy/upload failed: {e}"
-            msg += "\n" + error_message
-            logger.error(error_message, exc_info=True)
+        # --- Log: File Copy/Upload ---
+        logger.info(">>> Step 2/8: Copying Mosaic to GeoServer Storage...")
+        copy_to_geoserver_storage(mosaic_image, flight_name + ".tif")
+        msg += "\nMosaic pushed to GeoServer storage OK"
+        logger.info("Mosaic pushed to GeoServer storage OK")
+        mosaic_stored_ok = True
 
         try:
             # --- Log: Footprint Creation ---
@@ -754,6 +737,19 @@ def run_thermal_processing(flight_path_arg):
         # --- Log: Finish ---
         end_msg = f"=== FINISHED PROCESSING FOR: {flight_name} ==="
         logger.info(end_msg)
+
+    except Exception as e:
+        # If ANY of the steps in the 'try' block fails, the code will jump directly here.
+        success = False  # Mark the entire process as failed.
+        
+        # Create a clean, user-friendly error message for the failure email and logs.
+        error_details = f"A failure occurred during processing. Error: {str(e)}"
+        
+        # Append the failure details to the main message log for context.
+        msg += f"\n\n--- PROCESS FAILED ---\n{error_details}"
+        
+        # Log the full error with its stack trace for detailed debugging.
+        logger.error(error_details, exc_info=True)
 
 
 # =========================================================
