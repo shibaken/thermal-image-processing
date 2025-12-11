@@ -608,8 +608,6 @@ def run_thermal_processing(flight_path_arg):
         if not os.path.exists(output_folder):
             os.makedirs(output_folder)
         
-        success = True
-        msg = ""
         all_images_with_hotspots = []
         mosaic_stored_ok = False
 
@@ -666,7 +664,7 @@ def run_thermal_processing(flight_path_arg):
                 full_path = os.path.join(raw_img_folder, img)
                 translate_png2tif(full_path, img, flight_name)
             msg += "\nProduction of tif images OK"
-            logger.info("\nProduction of tif images OK")
+            logger.info("Production of tif images OK")
 
         # Wait for storage sync
         time.sleep(60)
@@ -691,23 +689,39 @@ def run_thermal_processing(flight_path_arg):
             msg += f"\nPublished {len(all_images_with_hotspots)} individual hotspot images to geoserver OK."
             logger.info(f"Published {len(all_images_with_hotspots)} individual hotspot images to geoserver OK.")
 
-        # --- Log: Finish ---
-        end_msg = f"=== FINISHED PROCESSING FOR: {flight_name} ==="
-        logger.info(end_msg)
-
     except Exception as e:
         # If ANY of the steps in the 'try' block fails, the code will jump directly here.
         success = False  # Mark the entire process as failed.
-        
-        # Create a clean, user-friendly error message for the failure email and logs.
         error_details = f"A failure occurred during processing. Error: {str(e)}"
-        
-        # Append the failure details to the main message log for context.
         msg += f"\n\n--- PROCESS FAILED ---\n{error_details}"
-        
-        # Log the full error with its stack trace for detailed debugging.
         logger.error(error_details, exc_info=True)
+    finally:
+        logger.info(">>> Preparing to send final completion notification email...")
+        try:
+            # Check the "scoreboard" variable to decide which email to send.
+            if success:
+                # If the 'success' flag is still True, send the success email.
+                email_sender.send_success_notification(
+                    flight_name=flight_name, 
+                    details_message=msg
+                )
+            else:
+                # If the 'success' flag was set to False in the 'except' block, send the failure email.
+                email_sender.send_failure_notification(
+                    flight_name=flight_name, 
+                    error_message=error_details
+                )
+        except Exception as e:
+            logger.error(f"FATAL: Could not send the final notification email. Error: {e}", exc_info=True)
 
+        # This ensures it's always the last thing logged for the process.
+        end_msg = f"=== FINISHED PROCESSING FOR: {flight_name} (Success: {success}) ==="
+        logger.info(end_msg)
+        
+        # Add cleanup for the logger's file handler.
+        if 'file_handler' in locals() and file_handler in logger.handlers:
+            logger.removeHandler(file_handler)
+            file_handler.close()
 
 # =========================================================
 # Legacy Support: Allows running from command line (like .sh)
