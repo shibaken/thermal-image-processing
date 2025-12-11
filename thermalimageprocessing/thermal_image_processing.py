@@ -642,38 +642,21 @@ def run_thermal_processing(flight_path_arg):
         msg += "\nFootprint lies in district(s) " + str(footprint.districts)
         logger.info("Footprint lies in district(s) " + str(footprint.districts))
 
-        try:
-            # --- Log: Bounding Boxes ---
-            logger.info(">>> Step 5/8: Creating Image Bounding Boxes...")
-            
-            bboxes = create_img_bounding_boxes(files, raw_img_folder)
-            success_msg = "Bounding box creation for images OK"
-            msg += "\n" + success_msg
-            logger.info(success_msg)
-        except Exception as e:
-            success = False
-            error_message = f"Bounding box creation for images failed: {e}"
-            msg += "\n" + error_message
-            logger.error(error_message, exc_info=True)
+        # --- Log: Bounding Boxes ---
+        logger.info(">>> Step 5/8: Creating Image Bounding Boxes...")
+        bboxes = create_img_bounding_boxes(files, raw_img_folder)
+        msg += "\nBounding box creation for images OK"
+        logger.info('Bounding box creation for images OK')
 
-        try:
-            # --- Log: Hotspot Analysis ---
-            logger.info(">>> Step 6/8: Analyzing Hotspots (Intersects)...")
-            
-            all_images_with_hotspots = create_boundaries_and_centroids(flight_timestamp, kml_boundaries_file, bboxes, engine, output_geopackage)
-            if all_images_with_hotspots == []:
-                success_msg = "NO HOTSPOTS FOUND!!!"
-                msg += "\n" + success_msg
-                logger.info(success_msg)
-            else:
-                success_msg = "Boundaries and centroids creation and push to PostGIS OK"
-                msg += "\n" + success_msg
-                logger.info(success_msg)
-        except Exception as e:
-                success = False
-                error_message = f"Boundaries and centroids creation or push to PostGIS failed: {e}"
-                msg += "\n" + error_message
-                logger.error(error_message, exc_info=True)
+        # --- Log: Hotspot Analysis ---
+        logger.info(">>> Step 6/8: Analyzing Hotspots (Intersects)...")
+        all_images_with_hotspots = create_boundaries_and_centroids(flight_timestamp, kml_boundaries_file, bboxes, engine, output_geopackage)
+        if not all_images_with_hotspots:
+            msg += "\nNO HOTSPOTS FOUND!!!"
+            logger.info("NO HOTSPOTS FOUND!!!")
+        else:
+            msg += "\nBoundaries and centroids creation and push to PostGIS OK"
+            logger.info("Boundaries and centroids creation and push to PostGIS OK")
 
         try:
             # --- Log: Image Conversion ---
