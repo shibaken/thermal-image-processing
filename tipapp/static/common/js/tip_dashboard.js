@@ -93,6 +93,19 @@ var tip_dashboard = {
               (res, status, xhr) => {
                 $(".button-download").attr("disabled", false);
 
+                // 1. Get the Content-Disposition header
+                const disposition = xhr.getResponseHeader("Content-Disposition");
+                let filename = "download.7z"; // Default fallback name
+
+                // 2. Extract filename using Regex
+                // Looks for filename="example.7z" pattern
+                if (disposition && disposition.indexOf("filename=") !== -1) {
+                  const match = disposition.match(/filename="?([^"]+)"?/);
+                  if (match && match[1]) {
+                    filename = match[1];
+                  }
+                }
+
                 const blobObj = new Blob([res], {
                   type: "application/x-7z-compressed",
                 });
@@ -101,7 +114,8 @@ var tip_dashboard = {
                 a.href = objectURL;
                 a.setAttribute(
                   "download",
-                  `thermal_images_${new Date().toLocaleTimeString()}.7z`
+                  // `thermal_images_${new Date().toLocaleTimeString()}.7z`
+                  filename
                 );
                 a.click();
               },
@@ -281,10 +295,15 @@ var tip_dashboard = {
       success: function (res, status, xhr) {
         if (cb_success) cb_success(res, status, xhr);
       },
-      error: function (e) {
+      error: function (jqXHR, textStatus, errorThrown) {
+        if (jqXHR.status === 200) {
+            if (cb_success) cb_success(jqXHR.response, textStatus, jqXHR);
+            return;
+        }
+
         const _ = tip_dashboard;
-        _.downloadFinished(e);
-        if (cb_error) cb_error(e);
+        _.downloadFinished(jqXHR);
+        if (cb_error) cb_error(jqXHR, textStatus, errorThrown);
       },
       xhr: function () {
         var xhr = new window.XMLHttpRequest();

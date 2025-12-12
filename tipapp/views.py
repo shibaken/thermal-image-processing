@@ -188,17 +188,71 @@ def api_delete_thermal_file(request, *args, **kwargs):
 @api_view(["GET"])
 @permission_classes([IsInAdminOrOfficersGroup])
 def api_download_thermal_file_or_folder(request, *args, **kwargs):
+    logger.info(f"Download request received from user: {request.user} for path: {request.GET.get('file_path')}")
+
     dir_path = settings.DATA_STORAGE
-    file_path = request.GET.get('file_path', '')
-    file_path = file_path if file_path.startswith(dir_path) else os.path.join(dir_path, file_path)
+    target_path = request.GET.get('file_path', '')
+
+    file_path = target_path
     
+    # Normalize the path to handle mixed slashes correctly
+    file_path = os.path.normpath(file_path)
+
+    # Check if the path exists
     if file_path != '' and os.path.exists(file_path):
-        
-        download_file_path = zip_thermal_file_or_folder(file_path)
-        if download_file_path:
-            filename = os.path.basename(download_file_path)
-            zip_file = open(download_file_path, 'rb')
-            return FileResponse(zip_file, as_attachment=True,  filename=filename)
-    
-    return JsonResponse({'error': f'There was an error with the download.'}, status=400)
-    
+        try:
+            file_to_serve = None
+            download_filename = ""
+
+            # Check if it is a directory or a file
+            if os.path.isdir(file_path):
+                # CASE 1: Directory -> Zip it
+                download_file_path = zip_thermal_file_or_folder(file_path)
+                
+                if download_file_path and os.path.exists(download_file_path):
+                    file_to_serve = download_file_path
+                    # Use folder name + .zip
+                    original_name = os.path.basename(file_path.rstrip(os.sep))
+                    download_filename = f"{original_name}.zip"
+                    logger.info(f"Directory zipped successfully. Serving: {file_to_serve} as {download_filename}")
+                else:
+                    logger.error(f"Failed to zip directory or zipped file not found: {file_path}")
+                    return JsonResponse({'error': 'Error zipping folder.'}, status=500)
+            else:
+                logger.info(f"Target is a file: {file_path}. Serving directly.")
+                # CASE 2: File -> Serve directly (no zip)
+                file_to_serve = file_path
+                # Use original filename
+                download_filename = os.path.basename(file_path)
+
+            # Serve the file if we have a valid path and filename
+            if file_to_serve and download_filename:
+                logger.debug(f"Opening file handle for: {file_to_serve}")
+                file_handle = open(file_to_serve, 'rb')
+                
+                response = FileResponse(file_handle, as_attachment=True, filename=download_filename)
+                
+                # Set headers
+                response["Content-Type"] = "application/octet-stream"
+                response["Content-Disposition"] = f'attachment; filename="{download_filename}"'
+                response["Access-Control-Expose-Headers"] = "Content-Disposition"
+                
+                logger.info(f"Successfully prepared download for {download_filename}") 
+                return response
+            else:
+                logger.error(f"Download preparation failed: file_to_serve={file_to_serve}, download_filename={download_filename}")
+                return JsonResponse({'error': 'Error preparing download.'}, status=500)
+            
+        except FileNotFoundError as e:
+            logger.error(f"File not found during serving process: {e}", exc_info=True)
+            return JsonResponse({'error': 'File not found on server.'}, status=404)
+        except Exception as e:
+            # Log the error with stack trace for detailed debugging
+            logger.exception(f"Error serving file/folder for path {file_path}: {e}")
+            return JsonResponse({'error': 'Error preparing download.'}, status=500) 
+    else:
+        if file_path == '':
+            logger.warning(f"Download request received with empty 'file_path' parameter from user: {request.user}")
+        else:
+            logger.warning(f"File or folder not found at path: {file_path}")
+        return JsonResponse({'error': 'File or folder not found.'}, status=400)

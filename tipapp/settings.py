@@ -314,7 +314,7 @@ if not RUNNING_DEVSERVER and SENTRY_DSN and EMAIL_INSTANCE:
     )
 
 PENDING_IMPORT_PATH=decouple.config("PENDING_IMPORT_PATH", default="./pending_imports/")
-DATA_STORAGE=decouple.config("DATA_STORAGE", default="./tipapp/thermal_data_processing/")
+DATA_STORAGE=decouple.config("DATA_STORAGE", default="./thermal_data_processing/")
 DOWNLOADS_PATH=decouple.config("DOWNLOADS_PATH", default="./thermal_downloads/")
 UPLOADS_HISTORY_PATH=decouple.config("DOWNLOADS_PATH", default="./thermal_files_uploaded/")
 for dir_path in [PENDING_IMPORT_PATH, DATA_STORAGE, DOWNLOADS_PATH, UPLOADS_HISTORY_PATH]:

@@ -92,17 +92,28 @@ var tip_uploads_history = {
             (res, status, xhr) => {
               $(".button-download").attr("disabled", false);
 
+              // 1. Get the Content-Disposition header
+              const disposition = xhr.getResponseHeader("Content-Disposition");
+              let filename = "download.7z"; // Fallback name
+
+              // 2. Extract filename using simple Regex (expects: filename="name.7z")
+              if (disposition && disposition.indexOf("filename=") !== -1) {
+                const match = disposition.match(/filename="?([^"]+)"?/);
+                if (match && match[1]) {
+                  filename = match[1];
+                }
+              }
+
               const blobObj = new Blob([res], {
-                type: "application/x-7z-compressed",
+                type: xhr.getResponseHeader("Content-Type") || "application/x-7z-compressed",
               });
               const objectURL = URL.createObjectURL(blobObj);
               const a = document.createElement("a");
               a.href = objectURL;
-              a.setAttribute(
-                "download",
-                `thermal_images_${new Date().toLocaleTimeString()}.7z`
-              );
+              a.setAttribute("download", filename);
               a.click();
+
+              window.URL.revokeObjectURL(objectURL);
             },
             (error) => {
               $(".button-download").attr("disabled", false);

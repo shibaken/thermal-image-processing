@@ -1,0 +1,15 @@
+Hello,
+
+An error occurred during the thermal image processing for flight {{ flight_name }}.
+The process did not complete successfully and requires your attention.
+
+
+--- Error Details ---
+{{ error_message }}
+---------------------
+
+Please review the system logs for more detailed information.
+
+
+Thank you,
+The Thermal Image Processing System

@@ -1,0 +1,9 @@
+Hello,
+
+This is an automated notification to inform you that the processing for flight {{ flight_name }} has started.
+
+You will receive another email upon completion.
+
+
+Thank you,
+The Thermal Image Processing System
