@@ -1,0 +1,122 @@
+{% extends 'govapp/base.html' %} 
+{% load static %}
+
+{% block title %}Management Command Runner{% endblock %}
+
+{% block content %}
+{% comment %} 
+    We check if the user is authenticated and has the required permission.
+    The permission check can be done in the view, so you might only need request.user.is_staff here.
+{% endcomment %}
+{% if request.user.is_staff %}
+
+<div class="container">
+    <div class="tip_dashboard my-1">
+
+        <div class="card rounded-3 shadow-sm">
+            <div class="card-header py-3">
+                <h4 class="my-0 fw-bold">Run Management Command</h4>
+            </div>
+            <div class="card-body">
+                
+                <p class="card-text text-muted">
+                    Click the button below to start the <strong>'process_imported_files_command'</strong>.
+                    <br>
+                    <strong class="text-warning">Warning:</strong> This process can take a long time to complete. Please do not close or navigate away from this page while it is running.
+                </p>
+                
+                <!-- The Button that the user will click -->
+                <button id="start-command-btn" class="btn btn-primary">
+                    <!-- A Bootstrap spinner icon, hidden by default -->
+                    <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true" style="display: none;"></span>
+                    <!-- The text of the button -->
+                    <span class="button-text">Run Command Now</span>
+                </button>
+                
+                <!-- An area to display status messages (e.g., "Processing...", "Success!") -->
+                <div id="command-status" class="mt-4"></div>
+                
+                <!-- An area to display the detailed output from the command, hidden by default -->
+                <div id="command-output-wrapper" class="mt-3" style="display: none;">
+                    <h5>Command Output:</h5>
+                    <pre id="command-output" style="background-color: #212529; color: #fff; padding: 1rem; border-radius: 5px; max-height: 400px; overflow-y: scroll;"></pre>
+                </div>
+
+            </div>
+        </div>
+    </div>
+</div>
+
+{% else %}
+    <div class="container">
+        <div class="alert alert-danger" role="alert" >
+            <h4 class="alert-heading">Permission Denied</h4>
+            <p>You do not have permission to access this page.</p>
+        </div>
+    </div>
+{% endif %}
+{% endblock %}
+
+
+{% block custom_js %}
+<script>
+// Self-executing anonymous function to avoid polluting the global namespace.
+(function() {
+    // This script will only run if the main content is present.
+    // if (!document.getElementById('start-command-btn')) {
+    //     return;
+    // }
+    $('#start-command-btn').on('click', function() {
+        console.log('clicked')
+        var $btn = $(this);
+        var $spinner = $btn.find('.spinner-border');
+        var $buttonText = $btn.find('.button-text');
+        var $statusDiv = $('#command-status');
+        var $outputWrapper = $('#command-output-wrapper');
+        var $outputPre = $('#command-output');
+
+        // 1. Update the UI to a "Processing" state
+        $btn.prop('disabled', true);
+        $buttonText.text('Processing...');
+        $spinner.show();
+        $statusDiv.html('<div class="alert alert-info">Processing has started. Please wait...</div>');
+        $outputWrapper.hide();
+
+        // 2. Send the AJAX request to the API endpoint
+        $.ajax({
+            url: "{% url 'trigger_long_command' %}",
+            type: "POST",
+            beforeSend: function(xhr) {
+                xhr.setRequestHeader("X-CSRFToken", "{{ csrf_token }}");
+            },
+            timeout: 30 * 60 * 1000, // 30 minutes
+            
+            // 3. Handle a successful response
+            success: function(response) {
+                $statusDiv.html('<div class="alert alert-success"><strong>Success!</strong> ' + response.message + '</div>');
+                $outputPre.text(response.output);
+                $outputWrapper.show();
+            },
+            
+            // 4. Handle an error response
+            error: function(xhr, textStatus, errorThrown) {
+                var errorMsg = "An unknown error occurred.";
+                if (textStatus === 'timeout') {
+                    errorMsg = 'The request timed out. The process on the server might still be running.';
+                } else if (xhr.responseJSON && xhr.responseJSON.message) {
+                    errorMsg = xhr.responseJSON.message;
+                }
+                $statusDiv.html('<div class="alert alert-danger"><strong>Error!</strong> ' + errorMsg + '</div>');
+            },
+            
+            // 5. Always run this when the request is complete
+            complete: function() {
+                $btn.prop('disabled', false);
+                $buttonText.text('Run Command Now');
+                $spinner.hide();
+            }
+        });
+    });
+})();
+</script>
+{% endblock %}
