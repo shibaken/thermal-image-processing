@@ -8,6 +8,17 @@
 {% endblock %}
 
 {% block extra_js %}
+<script src="/static/js/utils.js?ver={{ GIT_COMMIT_HASH }}"></script>
+<script src="/static/js/common.pagination.js?ver={{ GIT_COMMIT_HASH }}"></script>
+<script src="/static/js/table.js?ver={{ GIT_COMMIT_HASH }}"></script>
+<script src="/static/common/js/tip_upload.js?ver={{ GIT_COMMIT_HASH }}"></script>
+<script src="/static/common/js/tip_dashboard.js?ver={{ GIT_COMMIT_HASH }}"></script>
+<script src="/static/common/js/tip_uploads_history.js?ver={{ GIT_COMMIT_HASH }}"></script>
+<script src="/static/common/js/select2.js?ver={{ GIT_COMMIT_HASH }}"></script>
+<!-- any extra javascript goes here -->
+<!-- datatables -->
+<link href="/static/common/css/datatables.css" rel="stylesheet" />
+<script src="/static/common/js/datatables.min.js?ver={{ GIT_COMMIT_HASH }}"></script>
 {% endblock %}
 
 {% block header_top_menu %}
@@ -82,18 +93,6 @@
 {% endblock %}
 
 {% block custom_js %}
-<script src="/static/js/utils.js?ver={{ GIT_COMMIT_HASH }}"></script>
-<script src="/static/js/common.pagination.js?ver={{ GIT_COMMIT_HASH }}"></script>
-<script src="/static/js/table.js?ver={{ GIT_COMMIT_HASH }}"></script>
-<script src="/static/common/js/tip_upload.js?ver={{ GIT_COMMIT_HASH }}"></script>
-<script src="/static/common/js/tip_dashboard.js?ver={{ GIT_COMMIT_HASH }}"></script>
-<script src="/static/common/js/tip_uploads_history.js?ver={{ GIT_COMMIT_HASH }}"></script>
-<script src="/static/common/js/select2.js?ver={{ GIT_COMMIT_HASH }}"></script>
-<!-- any extra javascript goes here -->
-<!-- datatables -->
-<link href="/static/common/css/datatables.css" rel="stylesheet" />
-<script src="/static/common/js/datatables.min.js?ver={{ GIT_COMMIT_HASH }}"></script>
-{{ block.super }}
 {% endblock %}
 
 {% block page_footer %}
