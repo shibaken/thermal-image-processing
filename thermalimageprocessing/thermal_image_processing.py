@@ -20,7 +20,9 @@ from sqlalchemy import create_engine
 from postmarker.core import PostmarkClient
 from azure.storage.blob import BlobServiceClient, BlobClient, ContainerClient
 from shapely.geometry import shape, mapping
-from tipapp.emails import ThermalProcessingEmailSender
+from tipapp import settings
+from tipapp import emails
+
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
 parent_dir = os.path.dirname(current_dir)
@@ -39,9 +41,6 @@ gdal.SetConfigOption('OGR_GEOMETRY_ACCEPT_UNCLOSED_RING', 'YES')
 
 input_image_file_ext = ".png"
 output_image_file_ext = ".tif"
-
-source_folder = os.environ.get('thermal_source_folder') #"/data/data/projects/thermal-image-processing/thermalimageprocessing/thermal_data"
-dest_folder = os.environ.get('thermal_destination_folder') #"/data/data/projects/thermal-image-processing/thermalimageprocessing/thermal_data_processing"
 
 raw_url = decouple.config("general_postgis_table", default="NO DATABASE URL FOUND FOR THERMAL IMAGE PROCESSING.")
 if raw_url:
@@ -454,13 +453,13 @@ def publish_image_on_geoserver(flight_name, image_name=None):
         error_msg = f"Exception during Layer publication: {e}"
         logger.error(error_msg, exc_info=True)
 
-def unzip_and_prepare(full_filename_path, uploads_folder_path):
+def unzip_and_prepare(full_filename_path):
     """
     Handles file preparation: copying, moving, and unzipping.
     Replaces the functionality of the shell script.
     """
     # Get the base directory of the project
-    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    # base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     
     filename = os.path.basename(full_filename_path)
     
@@ -473,7 +472,9 @@ def unzip_and_prepare(full_filename_path, uploads_folder_path):
     logger.info(f"Target directory name: {dirname}")
 
     # Define processing directory
-    processing_base_folder = os.path.join(base_dir, 'thermal_data_processing')
+    # processing_base_folder = os.path.join(base_dir, 'thermal_data_processing')
+    processing_base_folder = settings.DATA_STORAGE
+
     if not os.path.exists(processing_base_folder):
         os.makedirs(processing_base_folder)
 
@@ -486,14 +487,14 @@ def unzip_and_prepare(full_filename_path, uploads_folder_path):
 
     # 2. Move original file to uploads history folder
     # Ensure uploads_folder_path is absolute
-    if not os.path.isabs(uploads_folder_path):
-        uploads_folder_path = os.path.join(base_dir, uploads_folder_path)
+    # if not os.path.isabs(uploads_folder_path):
+    #     uploads_folder_path = os.path.join(base_dir, uploads_folder_path)
     
-    dest_move_path = os.path.join(uploads_folder_path, filename)
-    logger.info(f"Moving original file to {dest_move_path}")
-    
-    if not os.path.exists(uploads_folder_path):
-         os.makedirs(uploads_folder_path, exist_ok=True)
+    dest_move_path = os.path.join(settings.UPLOADS_HISTORY_PATH, filename)
+    logger.info(f"Moving original file to {dest_move_path}")    
+
+    if not os.path.exists(settings.UPLOADS_HISTORY_PATH):
+         os.makedirs(settings.UPLOADS_HISTORY_PATH, exist_ok=True)
          
     shutil.move(full_filename_path, dest_move_path)
 
@@ -555,15 +556,13 @@ def run_thermal_processing(flight_path_arg):
     file_handler.setFormatter(formatter)
     logger.addHandler(file_handler)
 
-    # Instantiate the email sender service at the beginning.
-    email_sender = ThermalProcessingEmailSender()
-
     # Send the "Processing Started" notification immediately.
     # We wrap this in a try/except block so that a failure in sending this email
     # does not prevent the main processing from running.
     try:
         logger.info(">>> Sending 'Processing Started' notification email...")
-        email_sender.send_processing_started_notification(flight_name)
+        # email_sender.send_processing_started_notification(flight_name)
+        emails.send_processing_started_notification(flight_name)
     except Exception as e:
         logger.error(f"Failed to send 'started' notification email: {e}", exc_info=True)
 
@@ -701,13 +700,13 @@ def run_thermal_processing(flight_path_arg):
             # Check the "scoreboard" variable to decide which email to send.
             if success:
                 # If the 'success' flag is still True, send the success email.
-                email_sender.send_success_notification(
+                emails.send_success_notification(
                     flight_name=flight_name, 
                     details_message=msg
                 )
             else:
                 # If the 'success' flag was set to False in the 'except' block, send the failure email.
-                email_sender.send_failure_notification(
+                emails.send_failure_notification(
                     flight_name=flight_name, 
                     error_message=error_details
                 )

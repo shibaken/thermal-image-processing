@@ -105,26 +105,58 @@ def list_pending_imports(request, *args, **kwargs):
 @api_view(["GET"])
 @permission_classes([IsInAdminOrOfficersGroup])
 def list_thermal_folder_contents(request, *args, **kwargs):
-    dir_path = settings.DATA_STORAGE
+    """
+    Safely lists the contents of a directory within the DATA_STORAGE path.
+    Prevents path traversal attacks.
+    """
+    # --- Input parameters from the request ---
     page_param = request.GET.get('page', '1')
     page_size_param = request.GET.get('page_size', '10')
-    route_path = request.GET.get('route_path', '')
-    search = request.GET.get('search', '')
+    search_term = request.GET.get('search', '')
+    
+    # The path provided by the user/frontend, relative to the data storage root.
+    relative_path_from_user = request.GET.get('route_path', '')
 
-    dir_path = route_path if route_path.startswith(dir_path) else os.path.join(dir_path, route_path)
+    # 1. Define the absolute, trusted base directory from settings.
+    base_dir = os.path.abspath(settings.DATA_STORAGE)
 
-    if not os.path.exists(dir_path):
-        return JsonResponse({'error': f'Path [{dir_path}] does not exist.'}, status=400)
+    # 2. Safely join the base directory with the user-provided relative path.
+    target_path = os.path.join(base_dir, relative_path_from_user.lstrip('/\\'))
 
-    file_list = get_thermal_files(dir_path, int(page_param) - 1, int(page_size_param), search)
-    paginator = Paginator(file_list, page_size_param)
-    page = paginator.page(page_param)
-    return JsonResponse({
-        "count": paginator.count,
-        "hasPrevious": page.has_previous(),
-        "hasNext": page.has_next(),
-        'results': page.object_list,
-    })
+    # 3. Normalize the resulting path to resolve any '..' components (e.g., '/app/data/../data/files' -> '/app/data/files').
+    final_abs_path = os.path.abspath(target_path)
+
+    # 4. CRITICAL SECURITY CHECK:
+    #    Verify that the final, resolved path is still inside (or is the same as) our safe base directory.
+    if not final_abs_path.startswith(base_dir):
+        logger.warning(
+            f"Path traversal attempt blocked. User: {request.user}, "
+            f"Requested Path: '{relative_path_from_user}'"
+        )
+        return JsonResponse({'error': 'Access denied: Invalid path.'}, status=403) # 403 Forbidden is more appropriate
+    
+    # --- Check if the validated path exists ---
+    if not os.path.exists(final_abs_path) or not os.path.isdir(final_abs_path):
+        return JsonResponse({'error': f"Directory not found: '{relative_path_from_user}'"}, status=404)
+
+    # --- Retrieve and paginate the file list ---
+    try:
+        # Pass the safe, absolute path to the function that gets the files.
+        file_list = get_thermal_files(final_abs_path, int(page_param) - 1, int(page_size_param), search_term)
+        
+        paginator = Paginator(file_list, page_size_param)
+        page = paginator.page(page_param)
+        
+        return JsonResponse({
+            "count": paginator.count,
+            "hasPrevious": page.has_previous(),
+            "hasNext": page.has_next(),
+            'results': page.object_list,
+        })
+    except Exception as e:
+        logger.error(f"Error retrieving file list for '{final_abs_path}': {e}", exc_info=True)
+        return JsonResponse({'error': 'An error occurred while retrieving the file list.'}, status=500)
+
 
 @api_view(["GET"])
 @permission_classes([IsInAdminOrOfficersGroup])
@@ -195,7 +227,6 @@ def api_delete_thermal_file(request, *args, **kwargs):
 def api_download_thermal_file_or_folder(request, *args, **kwargs):
     logger.info(f"Download request received from user: {request.user} for path: {request.GET.get('file_path')}")
 
-    dir_path = settings.DATA_STORAGE
     target_path = request.GET.get('file_path', '')
 
     file_path = target_path

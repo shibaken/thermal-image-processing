@@ -250,10 +250,7 @@ if ENABLE_SQL_LOGGING:
         'propagate': False,
     }
 
-
 # Email
-#DISABLE_EMAIL = decouple.config("DISABLE_EMAIL", default=False, cast=bool)
-#EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
 EMAIL_BACKEND = "wagov_utils.components.utils.email_backend.EmailBackend"
 EMAIL_HOST = decouple.config("EMAIL_HOST", default="smtp.lan.fyi")
 EMAIL_PORT = decouple.config("EMAIL_PORT", default=25, cast=int)
@@ -262,6 +259,7 @@ EMAIL_INSTANCE = decouple.config("EMAIL_INSTANCE", default="PROD")
 NON_PROD_EMAIL = decouple.config("NON_PROD_EMAIL", default="")
 PRODUCTION_EMAIL= decouple.config("PRODUCTION_EMAIL", default=False, cast=bool)
 EMAIL_DELIVERY = decouple.config("EMAIL_DELIVERY", default="off")
+NOTIFICATION_RECIPIENTS = decouple.config('NOTIFICATION_RECIPIENTS', default='', cast=decouple.Csv())
 
 # Group Settings
 GROUP_ADMIN = 'Admin'
@@ -312,11 +310,16 @@ if not RUNNING_DEVSERVER and SENTRY_DSN and EMAIL_INSTANCE:
         environment=EMAIL_INSTANCE.lower(),
         release=APPLICATION_VERSION,
     )
+PENDING_IMPORT_FOLDER_NAME = "pending_imports"
+DATA_STORAGE_FOLDER_NAME = "thermal_data_processing"
+DOWNLOADS_FOLDER_NAME = "thermal_downloads"
+UPLOADS_HISTORY_FOLDER_NAME = "thermal_files_uploaded"
 
-PENDING_IMPORT_PATH=decouple.config("PENDING_IMPORT_PATH", default="./pending_imports/")
-DATA_STORAGE=decouple.config("DATA_STORAGE", default="./thermal_data_processing/")
-DOWNLOADS_PATH=decouple.config("DOWNLOADS_PATH", default="./thermal_downloads/")
-UPLOADS_HISTORY_PATH=decouple.config("DOWNLOADS_PATH", default="./thermal_files_uploaded/")
+PENDING_IMPORT_PATH = decouple.config("PENDING_IMPORT_PATH", default=os.path.join(BASE_DIR, PENDING_IMPORT_FOLDER_NAME))
+DATA_STORAGE = decouple.config("DATA_STORAGE", default=os.path.join(BASE_DIR, DATA_STORAGE_FOLDER_NAME))
+DOWNLOADS_PATH = decouple.config("DOWNLOADS_PATH", default=os.path.join(BASE_DIR, DOWNLOADS_FOLDER_NAME))
+UPLOADS_HISTORY_PATH = decouple.config("UPLOADS_HISTORY_PATH", default=os.path.join(BASE_DIR, UPLOADS_HISTORY_FOLDER_NAME))
+
 for dir_path in [PENDING_IMPORT_PATH, DATA_STORAGE, DOWNLOADS_PATH, UPLOADS_HISTORY_PATH]:
     if not os.path.exists(dir_path):
         os.makedirs(dir_path)
