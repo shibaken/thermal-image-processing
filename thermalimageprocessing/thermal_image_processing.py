@@ -21,7 +21,8 @@ from postmarker.core import PostmarkClient
 from azure.storage.blob import BlobServiceClient, BlobClient, ContainerClient
 from shapely.geometry import shape, mapping
 from tipapp import settings
-from tipapp.emails import ThermalProcessingEmailSender
+from tipapp import emails
+
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
 parent_dir = os.path.dirname(current_dir)
@@ -555,15 +556,13 @@ def run_thermal_processing(flight_path_arg):
     file_handler.setFormatter(formatter)
     logger.addHandler(file_handler)
 
-    # Instantiate the email sender service at the beginning.
-    email_sender = ThermalProcessingEmailSender()
-
     # Send the "Processing Started" notification immediately.
     # We wrap this in a try/except block so that a failure in sending this email
     # does not prevent the main processing from running.
     try:
         logger.info(">>> Sending 'Processing Started' notification email...")
-        email_sender.send_processing_started_notification(flight_name)
+        # email_sender.send_processing_started_notification(flight_name)
+        emails.send_processing_started_notification(flight_name)
     except Exception as e:
         logger.error(f"Failed to send 'started' notification email: {e}", exc_info=True)
 
@@ -701,13 +700,13 @@ def run_thermal_processing(flight_path_arg):
             # Check the "scoreboard" variable to decide which email to send.
             if success:
                 # If the 'success' flag is still True, send the success email.
-                email_sender.send_success_notification(
+                emails.send_success_notification(
                     flight_name=flight_name, 
                     details_message=msg
                 )
             else:
                 # If the 'success' flag was set to False in the 'except' block, send the failure email.
-                email_sender.send_failure_notification(
+                emails.send_failure_notification(
                     flight_name=flight_name, 
                     error_message=error_details
                 )
