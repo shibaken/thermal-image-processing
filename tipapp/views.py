@@ -5,6 +5,7 @@
 import os
 import logging
 import io
+import zipfile
 
 from django import http
 from django import shortcuts
@@ -21,7 +22,7 @@ from django.contrib.auth.decorators import login_required, user_passes_test
 
 # Internal
 from tipapp import settings
-from tipapp.tasks import get_files_list, get_file_record, get_thermal_files, zip_thermal_file_or_folder
+from tipapp.tasks import get_files_list, get_file_record, get_thermal_files
 from tipapp.permissions import IsInAdministratorsGroup, IsInAdminOrOfficersGroup, IsInOfficersGroup
 
 # Typing
@@ -222,76 +223,112 @@ def api_delete_thermal_file(request, *args, **kwargs):
         return JsonResponse({'error': f'File [{file_name}] does not exist.'}, status=400)
 
 
+def zip_directory_in_memory(full_path: str) -> io.BytesIO:
+    """
+    Zips a directory and returns it as an in-memory BytesIO object.
+    This avoids creating temporary files on disk.
+    """
+    # Create an in-memory binary stream
+    buffer = io.BytesIO()
+
+    # Use a 'with' statement to ensure the zip file is properly finalized (closed)
+    with zipfile.ZipFile(buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
+        for root, dirs, files in os.walk(full_path):
+            for file in files:
+                file_path = os.path.join(root, file)
+                # Calculate the relative path to be used inside the zip archive
+                arcname = os.path.relpath(file_path, start=full_path)
+                zf.write(file_path, arcname)
+
+    # Rewind the buffer's position to the beginning
+    buffer.seek(0)
+    
+    return buffer
+
+
 @api_view(["GET"])
 @permission_classes([IsInAdminOrOfficersGroup])
 def api_download_thermal_file_or_folder(request, *args, **kwargs):
+    """
+    Handles the download of a specified file or a zipped folder.
+
+    This view validates that the requested path is within the allowed storage
+    directories (DATA_STORAGE or UPLOADS_HISTORY_PATH) to prevent security vulnerabilities
+    like path traversal.
+    """
+    # Log the initial request for debugging purposes.
     logger.info(f"Download request received from user: {request.user} for path: {request.GET.get('file_path')}")
-
-    target_path = request.GET.get('file_path', '')
-
-    file_path = target_path
     
-    # Normalize the path to handle mixed slashes correctly
-    file_path = os.path.normpath(file_path)
+    # Get the path provided by the frontend.
+    user_provided_path = request.GET.get('file_path', '')
 
-    # Check if the path exists
-    if file_path != '' and os.path.exists(file_path):
-        try:
-            file_to_serve = None
-            download_filename = ""
+    # --- Secure Path Resolution and Validation ---
 
-            # Check if it is a directory or a file
-            if os.path.isdir(file_path):
-                # CASE 1: Directory -> Zip it
-                download_file_path = zip_thermal_file_or_folder(file_path)
-                
-                if download_file_path and os.path.exists(download_file_path):
-                    file_to_serve = download_file_path
-                    # Use folder name + .zip
-                    original_name = os.path.basename(file_path.rstrip(os.sep))
-                    download_filename = f"{original_name}.zip"
-                    logger.info(f"Directory zipped successfully. Serving: {file_to_serve} as {download_filename}")
-                else:
-                    logger.error(f"Failed to zip directory or zipped file not found: {file_path}")
-                    return JsonResponse({'error': 'Error zipping folder.'}, status=500)
-            else:
-                logger.info(f"Target is a file: {file_path}. Serving directly.")
-                # CASE 2: File -> Serve directly (no zip)
-                file_to_serve = file_path
-                # Use original filename
-                download_filename = os.path.basename(file_path)
+    # 1. Define a list of safe, absolute base directories from settings.
+    #    These are the only top-level directories this view is allowed to serve files from.
+    allowed_base_paths = [
+        os.path.abspath(settings.DATA_STORAGE),
+        os.path.abspath(settings.UPLOADS_HISTORY_PATH)
+    ]
 
-            # Serve the file if we have a valid path and filename
-            if file_to_serve and download_filename:
-                logger.debug(f"Opening file handle for: {file_to_serve}")
-                file_handle = open(file_to_serve, 'rb')
-                
-                response = FileResponse(file_handle, as_attachment=True, filename=download_filename)
-                
-                # Set headers
-                response["Content-Type"] = "application/octet-stream"
-                response["Content-Disposition"] = f'attachment; filename="{download_filename}"'
-                response["Access-Control-Expose-Headers"] = "Content-Disposition"
-                
-                logger.info(f"Successfully prepared download for {download_filename}") 
-                return response
-            else:
-                logger.error(f"Download preparation failed: file_to_serve={file_to_serve}, download_filename={download_filename}")
-                return JsonResponse({'error': 'Error preparing download.'}, status=500)
+    # 2. Normalize the user-provided path to resolve any '..' components and get the real absolute path.
+    #    For example, '/app/data/../data/files' becomes '/app/data/files'.
+    target_path = os.path.abspath(user_provided_path)
+
+    # 3. CRITICAL SECURITY CHECK:
+    #    Verify that the normalized `target_path` starts with one of the allowed base paths.
+    #    The 'any()' function checks if this condition is true for at least one item in the list.
+    is_safe_path = any(target_path.startswith(base_path) for base_path in allowed_base_paths)
+    
+    if not is_safe_path:
+        # If the check fails, it's a potential security risk (path traversal attack).
+        logger.warning(
+            f"Download attempt for an unsafe path was blocked. User: {request.user}, Requested Path: '{user_provided_path}'"
+        )
+        return JsonResponse({'error': 'Access to the specified path is denied.'}, status=403) # 403 Forbidden
+
+    # --- Path Existence Check ---
+    if not os.path.exists(target_path):
+        logger.warning(f"Download request for a non-existent path: {target_path}")
+        return JsonResponse({'error': 'File or folder not found.'}, status=404)
+
+    # --- File/Folder Processing ---
+    try:
+        # Get the final filename for the download.
+        download_filename = os.path.basename(target_path.rstrip(os.sep))
+
+        if os.path.isdir(target_path):
+            # --- Logic for FOLDER download ---
+            logger.info(f"Target is a directory. Zipping in memory: {target_path}")
             
-        except FileNotFoundError as e:
-            logger.error(f"File not found during serving process: {e}", exc_info=True)
-            return JsonResponse({'error': 'File not found on server.'}, status=404)
-        except Exception as e:
-            # Log the error with stack trace for detailed debugging
-            logger.exception(f"Error serving file/folder for path {file_path}: {e}")
-            return JsonResponse({'error': 'Error preparing download.'}, status=500) 
-    else:
-        if file_path == '':
-            logger.warning(f"Download request received with empty 'file_path' parameter from user: {request.user}")
-        else:
-            logger.warning(f"File or folder not found at path: {file_path}")
-        return JsonResponse({'error': 'File or folder not found.'}, status=400)
+            # Use the helper function to zip the directory in memory.
+            file_buffer = zip_directory_in_memory(target_path)
+            
+            # Create a FileResponse with the zipped content.
+            response = FileResponse(file_buffer, as_attachment=True, filename=f"{download_filename}.zip")
+            response["Content-Type"] = "application/zip"
+            
+        else: # The path points to a single FILE
+            # --- Logic for FILE download ---
+            logger.info(f"Target is a file. Serving directly: {target_path}")
+            
+            # Open the file in binary read mode.
+            file_handle = open(target_path, 'rb')
+            
+            # Create a FileResponse with the file content.
+            response = FileResponse(file_handle, as_attachment=True, filename=download_filename)
+            response["Content-Type"] = "application/octet-stream"
+
+        # This header is required for the frontend to be able to read the filename from the response.
+        response["Access-Control-Expose-Headers"] = "Content-Disposition"
+        
+        logger.info(f"Successfully prepared download for {response.filename}")
+        return response
+
+    except Exception as e:
+        # Catch any unexpected errors during zipping or file reading.
+        logger.exception(f"An unexpected error occurred while preparing download for path {target_path}: {e}")
+        return JsonResponse({'error': 'An internal error occurred while preparing the download.'}, status=500)
 
 
 def is_staff_user(user):

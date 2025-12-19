@@ -68,25 +68,3 @@ def get_file_record(dir_path, file_name):
     file_path = os.path.join(dir_path, file_name)
     info = os.stat(file_path)
     return {"name": file_name, "path" : file_path , "created_at": convert_date(info.st_mtime)}
-
-def zip_thermal_file_or_folder(dir_path):
-    try:
-        new_file_path = os.path.join(settings.DOWNLOADS_PATH,'download_'+str(datetime.now().timestamp()).split('.')[0]) 
-
-        download_file_path = f'{new_file_path}.7z'
-        if not os.path.exists(dir_path):
-            return None           
-        
-        arcname = os.path.basename(dir_path)
-        if os.path.isfile(dir_path):
-            with py7zr.SevenZipFile(download_file_path, 'w') as archive:
-                archive.write(dir_path, arcname=arcname)
-        else:
-            with py7zr.SevenZipFile(download_file_path, 'w') as archive:
-                archive.writeall(dir_path, arcname=arcname)
-            
-        return download_file_path
-    except Exception as e:
-        logger.error(f"Error zipping thermal file or folder: {dir_path}")
-        return None
-    
