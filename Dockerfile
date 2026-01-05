@@ -22,6 +22,7 @@ RUN apt-get install --no-install-recommends -y wget git libmagic-dev gcc binutil
 RUN apt-get install --no-install-recommends -y libpq-dev patch virtualenv
 RUN apt-get install --no-install-recommends -y postgresql-client mtr 
 RUN apt-get install --no-install-recommends -y sqlite3 vim postgresql-client ssh htop iputils-ping python3-azure p7zip-full
+RUN apt-get install --no-install-recommends -y software-properties-common 
 # RUN apt-get install --no-install-recommends -y gdal-bin python3-gdal
 # RUN apt-get install --no-install-recommends -y libgdal-dev build-essential 
 
