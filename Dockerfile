@@ -26,7 +26,7 @@ RUN apt-get install --no-install-recommends -y software-properties-common
 # RUN apt-get install --no-install-recommends -y gdal-bin python3-gdal
 # RUN apt-get install --no-install-recommends -y libgdal-dev build-essential 
 
-RUN ln -s /usr/bin/python3 /usr/bin/python 
+# RUN ln -s /usr/bin/python3 /usr/bin/python 
 
 # Install GDAL
 RUN add-apt-repository ppa:ubuntugis/ubuntugis-unstable
