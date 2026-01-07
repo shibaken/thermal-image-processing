@@ -1,14 +1,10 @@
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Processing Started</title>
-</head>
-<body>
+{% extends "emails/base_email.html" %}
+
+{% block email_content %}
     <p>Hello,</p>
     <p>This is an automated notification to inform you that the processing for flight <strong>{{ flight_name }}</strong> has started.</p>
     <p>You will receive another email upon completion.</p>
     <br>
     <p>Thank you,</p>
     <p>The Thermal Image Processing System</p>
-</body>
-</html>
+{% endblock %}

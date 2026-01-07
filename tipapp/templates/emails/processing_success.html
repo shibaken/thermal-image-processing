@@ -1,27 +1,15 @@
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Processing Successful</title>
-    <style>
-        body { font-family: sans-serif; }
-        .container { padding: 20px; border: 1px solid #ccc; border-radius: 5px; max-width: 600px; }
-        .success { color: #28a745; }
-        pre { background-color: #f8f9fa; padding: 15px; border-radius: 4px; white-space: pre-wrap; word-wrap: break-word; }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <h2 class="success">Processing Completed Successfully</h2>
-        <p>Hello,</p>
-        <p>The thermal image processing for flight <strong>{{ flight_name }}</strong> has completed successfully.</p>
-        
-        <h3>Processing Summary:</h3>
-        <pre>{{ details_message }}</pre>
+{% extends "emails/base_email.html" %}
 
-        <p>The data should now be available in the system.</p>
-        <br>
-        <p>Thank you,</p>
-        <p>The Thermal Image Processing System</p>
-    </div>
-</body>
-</html>
+{% block email_content %}
+    <h2 class="success">Processing Completed Successfully</h2>
+    <p>Hello,</p>
+    <p>The thermal image processing for flight <strong>{{ flight_name }}</strong> has completed successfully.</p>
+    
+    <h3>Processing Summary:</h3>
+    <pre>{{ details_message }}</pre>
+
+    <p>The data should now be available in the system.</p>
+    <br>
+    <p>Thank you,</p>
+    <p>The Thermal Image Processing System</p>
+{% endblock %}
