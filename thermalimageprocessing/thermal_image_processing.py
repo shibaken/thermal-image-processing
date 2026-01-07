@@ -633,6 +633,10 @@ def run_thermal_processing(flight_path_arg):
         msg += "\nFootprint produced and pushed to PostGIS OK"
         logger.info('Footprint produced and pushed to PostGIS OK') 
 
+        # TEST MODE: Intentional failure for email testing
+        if decouple.config("TEST_THERMAL_PROCESSING_FAILURE", default="false") == 'true':
+            raise Exception("TEST MODE: Intentional failure for email testing")
+
         # --- Log: District Check ---
         logger.info(">>> Step 4/8: Checking Districts...")
         get_footprint_districts(footprint, output_geopackage)
