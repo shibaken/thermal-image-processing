@@ -25,7 +25,7 @@ class ProcessingFailureEmail(TemplateEmailBase):
     """
     An email to notify that the thermal processing has failed.
     """
-    subject = "URGENT: Thermal Image Processing Failed"
+    subject = "Failed: Thermal Image Processing"
     html_template = "emails/processing_failure.html"
     txt_template = "emails/processing_failure.txt"
 
