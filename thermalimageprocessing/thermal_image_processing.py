@@ -373,25 +373,6 @@ def create_boundaries_and_centroids(flight_timestamp, kml_boundaries_file, bboxe
     finally:
         return sorted(all_images_with_hotspots)
 
-def send_notification_emails(flight_name, success, msg, districts=[]):
-    postmark = PostmarkClient(server_token=config.get('general', 'server_token'))
-    recipients = os.environ.get('email_always_email') # config.get('emails', 'always_email')
-    if not success:
-        postmark.emails.send(
-            From='patrick.maslen@dbca.wa.gov.au',
-            To=recipients,
-            Subject='New Thermal Image data FAILED to complete processing',
-            HtmlBody='Automated email advising that a new dataset,' + flight_name + ', has arrived but has not been successfully processed on kens-therm-001.<br>' + msg
-        )
-    else:
-        for district in districts:
-            recipients += ', ' + os.environ.get('email_'+district) #config.get('emails', district)
-        postmark.emails.send(
-                From=os.environ.get('email_from_address','no-reply@dbca.wa.gov.au'),
-                To=recipients,
-                Subject='New Thermal Image data available',
-                HtmlBody='Automated email advising that a new dataset,' + flight_name + ', has arrived and has been successfully processed; it can be viewed in SSS.<br>' + msg)
-
 def publish_image_on_geoserver(flight_name, image_name=None):
     logger.info(f'Publishing to GeoServer... Flight: {flight_name}, Image: {image_name}')
 
@@ -634,7 +615,7 @@ def run_thermal_processing(flight_path_arg):
         logger.info('Footprint produced and pushed to PostGIS OK') 
 
         # TEST MODE: Intentional failure for email testing
-        if decouple.config("TEST_THERMAL_PROCESSING_FAILURE", default="false") == 'true':
+        if decouple.config("TEST_THERMAL_PROCESSING_FAILURE", default=False, cast=bool):
             raise Exception("TEST MODE: Intentional failure for email testing")
 
         # --- Log: District Check ---
