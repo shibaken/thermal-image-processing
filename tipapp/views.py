@@ -114,6 +114,8 @@ def list_thermal_folder_contents(request, *args, **kwargs):
     page_param = request.GET.get('page', '1')
     page_size_param = request.GET.get('page_size', '10')
     search_term = request.GET.get('search', '')
+    sort_by = request.GET.get('sort_by', 'name')
+    sort_order = request.GET.get('sort_order', 'asc')
     
     # The path provided by the user/frontend, relative to the data storage root.
     relative_path_from_user = request.GET.get('route_path', '')
@@ -143,7 +145,7 @@ def list_thermal_folder_contents(request, *args, **kwargs):
     # --- Retrieve and paginate the file list ---
     try:
         # Pass the safe, absolute path to the function that gets the files.
-        file_list = get_thermal_files(final_abs_path, int(page_param) - 1, int(page_size_param), search_term)
+        file_list = get_thermal_files(final_abs_path, int(page_param) - 1, int(page_size_param), search_term, sort_by, sort_order)
         
         paginator = Paginator(file_list, page_size_param)
         page = paginator.page(page_param)

@@ -40,32 +40,57 @@ def get_dir_size(dir_path):
         logger.error(e)
         return 0
 
-def get_thermal_files(dir_path, page, offset, search = ""):
-    items = []
-    index = 0
+def get_thermal_files(dir_path, page, offset, search = "", sort_by = "name", sort_order = "asc"):
+    all_items = []
     try:
-        dir_entries = sorted(os.scandir(dir_path), key=lambda x: (x.is_file(), x.name))
-        
-        for entry in dir_entries:
+        # First, collect all entries with their metadata
+        for entry in os.scandir(dir_path):
             entry_name = entry.name
             if search != "" and not re.search(str.lower(search), str.lower(entry_name)):
                 continue
-            if index >=page * offset and index < (page + 1) * offset:
-                info = entry.stat()
-                is_dir = not entry.is_file()
-                item = {"name": entry_name, "path" : entry.path , "created_at": convert_date(info.st_mtime), "is_dir": is_dir }
-                if is_dir:
-                    item['size'] = get_dir_size(entry.path)
-                else:
-                    item['size'] = info.st_size
-                items.append(item)
+            
+            info = entry.stat()
+            is_dir = not entry.is_file()
+            item = {
+                "name": entry_name, 
+                "path": entry.path, 
+                "created_at": convert_date(info.st_mtime),
+                "created_at_timestamp": info.st_mtime,
+                "is_dir": is_dir
+            }
+            if is_dir:
+                item['size'] = get_dir_size(entry.path)
             else:
-                items.append({'name': entry_name})
-            index += 1
+                item['size'] = info.st_size
+            all_items.append(item)
+        
+        # Sort the items
+        reverse = (sort_order.lower() == "desc")
+        if sort_by == "name":
+            # Sort folders first, then by name
+            all_items.sort(key=lambda x: (x['is_dir'] == False, x['name'].lower()), reverse=reverse)
+        elif sort_by == "created_at":
+            # Sort folders first, then by creation date
+            all_items.sort(key=lambda x: (x['is_dir'] == False, x['created_at_timestamp']), reverse=reverse)
+        elif sort_by == "size":
+            # Sort folders first, then by size
+            all_items.sort(key=lambda x: (x['is_dir'] == False, x['size']), reverse=reverse)
+        
+        # Remove the temporary timestamp field
+        for item in all_items:
+            item.pop('created_at_timestamp', None)
+        
+        # Paginate the results
+        start_index = page * offset
+        end_index = (page + 1) * offset
+        items = all_items[start_index:end_index]
+        
     except Exception as e:
         logger.error(f"Error getting thermal files from directory: {dir_path}")
+        logger.error(e)
+        return []
             
-    return items
+    return all_items
 
 def get_file_record(dir_path, file_name):
     file_path = os.path.join(dir_path, file_name)

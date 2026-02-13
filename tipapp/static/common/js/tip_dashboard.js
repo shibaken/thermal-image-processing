@@ -56,12 +56,25 @@ var tip_dashboard = {
           _.var.search = data?.search?.value;
         }
 
+        // Get sort information from DataTables
+        let sort_by = "name";
+        let sort_order = "asc";
+        if (data?.order && data.order.length > 0) {
+          const columnIndex = data.order[0].column;
+          const direction = data.order[0].dir;
+          const columnNames = ["name", "created_at", "size"];
+          sort_by = columnNames[columnIndex] || "name";
+          sort_order = direction;
+        }
+
         _.get_folder_data(
           {
             page: _.var.page,
             page_size: _.var.page_size,
             route_path: _.var.route_path,
             search: _.var.search,
+            sort_by: sort_by,
+            sort_order: sort_order,
             draw: data?.draw,
           },
           function (response) {
@@ -264,6 +277,8 @@ var tip_dashboard = {
       page_size: params?.page_size ?? _.var.page_size,
       route_path: params?.route_path ?? "",
       search: params?.search ?? "",
+      sort_by: params?.sort_by ?? "name",
+      sort_order: params?.sort_order ?? "asc",
     };
     const queryParams = utils.make_query_params(_params);
     history.replaceState(null, null, "?" + queryParams.toString());
