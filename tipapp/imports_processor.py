@@ -42,6 +42,33 @@ class ImportsProcessor():
                 print(f"\nProcessing file: {filename}")
                 logger.info ("File to be processed: " + str(entry.path))   
 
+                # Phase 3: Find and update job record
+                from tipapp.models import ThermalProcessingJob
+                from django.utils import timezone
+                import re
+                
+                job = None
+                flight_name = filename
+                # Remove .7z or .zip extension
+                if flight_name.lower().endswith('.7z'):
+                    flight_name = flight_name[:-3]
+                elif flight_name.lower().endswith('.zip'):
+                    flight_name = flight_name[:-4]
+                # Remove timestamp if present (format: .YYYYMMDD_HHMMSS)
+                flight_name = re.sub(r'\.\d{8}_\d{6}$', '', flight_name)
+                
+                try:
+                    job = ThermalProcessingJob.objects.get(flight_name=flight_name)
+                    job.status = 'PROCESSING'
+                    job.processing_started_at = timezone.now()
+                    job.current_step = 'Starting file preparation'
+                    job.save()
+                    logger.info(f"Job {job.id} status updated to PROCESSING")
+                except ThermalProcessingJob.DoesNotExist:
+                    logger.warning(f"Job record not found for {flight_name}, processing will continue without tracking")
+                except Exception as e:
+                    logger.error(f"Error updating job status: {e}", exc_info=True)
+
                 try:
                     # =========================================================
                     # Call Python functions directly instead of .sh
@@ -60,10 +87,22 @@ class ImportsProcessor():
                     # 2. Run Main Thermal Processing
                     # This runs the GDAL/PostGIS/GeoServer pipeline
                     print(f"  -> Starting main thermal processing pipeline...")
-                    run_thermal_processing(processed_dir_path)
+                    run_thermal_processing(processed_dir_path, job_id=job.id if job else None)
                     
                     print(f"  -> Thermal processing pipeline completed successfully.")
                     logger.info(f"Successfully finished processing for: {filename}")
+                    
+                    # Phase 3: Update job status to COMPLETED
+                    if job:
+                        try:
+                            job.status = 'COMPLETED'
+                            job.processing_completed_at = timezone.now()
+                            job.current_step = 'Processing completed successfully'
+                            job.progress_percentage = 100
+                            job.save()
+                            logger.info(f"Job {job.id} status updated to COMPLETED")
+                        except Exception as e:
+                            logger.error(f"Error updating job completion status: {e}", exc_info=True)
                     
                     print(f"  => SUCCESS: Finished processing {filename}")
 
@@ -71,6 +110,18 @@ class ImportsProcessor():
                 except Exception as e:
                     print(f"  => ERROR: An error occurred while processing {filename}: {e}")
                     logger.error(f"Error processing file {filename}: {e}", exc_info=True)
+                    
+                    # Phase 3: Update job status to FAILED
+                    if job:
+                        try:
+                            job.status = 'FAILED'
+                            job.processing_completed_at = timezone.now()
+                            job.error_message = str(e)
+                            job.current_step = 'Processing failed'
+                            job.save()
+                            logger.info(f"Job {job.id} status updated to FAILED")
+                        except Exception as update_error:
+                            logger.error(f"Error updating job failure status: {update_error}", exc_info=True)
 
             print("-" * 50)
             print("All pending files have been processed.")

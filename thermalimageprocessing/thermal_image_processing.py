@@ -537,14 +537,29 @@ def unzip_and_prepare(full_filename_path):
 # =========================================================
 # Main processing logic wrapper
 # =========================================================
-def run_thermal_processing(flight_path_arg):
+def run_thermal_processing(flight_path_arg, job_id=None):
     """
     Main entry point for thermal image processing.
+    
+    Args:
+        flight_path_arg: Full path to the extracted flight data directory
+        job_id: Optional ThermalProcessingJob ID for status tracking (Phase 3)
     """
     # Argument is now the full path
     flight_name = os.path.basename(flight_path_arg)
     flight_timestamp = flight_name.replace("FireFlight_", "")
     main_folder = flight_path_arg
+    
+    # Phase 3: Get job object if job_id provided
+    job = None
+    if job_id:
+        try:
+            from tipapp.models import ThermalProcessingJob
+            job = ThermalProcessingJob.objects.get(id=job_id)
+            logger.info(f"Processing with job tracking: Job ID={job_id}")
+        except Exception as e:
+            logger.warning(f"Could not retrieve job {job_id}: {e}")
+            job = None
 
     # Set filepaths
     raw_img_folder = os.path.join(main_folder, "PNGs/CAMERA1")
@@ -791,6 +806,28 @@ def run_thermal_processing(flight_path_arg):
                 )
         except Exception as e:
             logger.error(f"FATAL: Could not send the final notification email. Error: {e}", exc_info=True)
+
+        # Phase 3: Update job with final processing results
+        if job:
+            try:
+                from django.utils import timezone
+                job.log_file_path = log_file_path if 'log_file_path' in locals() else ''
+                job.output_geopackage_path = output_geopackage if 'output_geopackage' in locals() else ''
+                
+                # Update status if not already set by ImportsProcessor
+                if success and job.status != 'COMPLETED':
+                    job.status = 'COMPLETED'
+                    job.processing_completed_at = timezone.now()
+                    job.progress_percentage = 100
+                elif not success and job.status != 'FAILED':
+                    job.status = 'FAILED'
+                    job.processing_completed_at = timezone.now()
+                    job.error_message = error_details
+                
+                job.save()
+                logger.info(f"Job {job.id} final results saved: status={job.status}")
+            except Exception as e:
+                logger.error(f"Error saving final job results: {e}", exc_info=True)
 
         # This ensures it's always the last thing logged for the process.
         end_msg = f"=== FINISHED PROCESSING FOR: {flight_name} (Success: {success}) ==="
