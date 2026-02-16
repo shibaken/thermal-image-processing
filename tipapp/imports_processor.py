@@ -62,6 +62,7 @@ class ImportsProcessor():
                     job.status = 'PROCESSING'
                     job.processing_started_at = timezone.now()
                     job.current_step = 'Starting file preparation'
+                    job.progress_percentage = 5
                     job.save()
                     logger.info(f"Job {job.id} status updated to PROCESSING")
                 except ThermalProcessingJob.DoesNotExist:
@@ -75,6 +76,15 @@ class ImportsProcessor():
                     # =========================================================
                     print(f"  -> Starting file preparation (unzip and move)...")
                     logger.info(f"Starting direct Python processing for: {filename}")
+                    
+                    # Phase 4: Update progress before unzipping
+                    if job:
+                        try:
+                            job.current_step = 'Unzipping file'
+                            job.progress_percentage = 10
+                            job.save(update_fields=['current_step', 'progress_percentage'])
+                        except Exception as e:
+                            logger.error(f"Error updating unzip progress: {e}")
                     
                     # 1. Unzip and Prepare (Replaces shell script logic)
                     # entry.path: The full path to the pending .7z file

@@ -560,6 +560,18 @@ def run_thermal_processing(flight_path_arg, job_id=None):
         except Exception as e:
             logger.warning(f"Could not retrieve job {job_id}: {e}")
             job = None
+    
+    # Phase 4: Helper function to update job progress
+    def update_job_progress(step_description, percentage):
+        """Update job progress if job tracking is enabled"""
+        if job:
+            try:
+                job.current_step = step_description
+                job.progress_percentage = percentage
+                job.save(update_fields=['current_step', 'progress_percentage', 'updated_at'])
+                logger.info(f"Job progress: {percentage}% - {step_description}")
+            except Exception as e:
+                logger.error(f"Error updating job progress: {e}", exc_info=True)
 
     # Set filepaths
     raw_img_folder = os.path.join(main_folder, "PNGs/CAMERA1")
@@ -667,6 +679,8 @@ def run_thermal_processing(flight_path_arg, job_id=None):
 
         # --- Log: Mosaic Creation ---
         logger.info(">>> Step 1/8: Creating Mosaic Image (gdal.Warp)...")
+        # Phase 4: Update progress
+        update_job_progress('Creating mosaic image', 30)
         # Pass output path explicitly
         merge(files, mosaic_image)
         msg += "\nMosaic produced OK"
@@ -677,6 +691,8 @@ def run_thermal_processing(flight_path_arg, job_id=None):
 
         # --- Log: File Copy/Upload ---
         logger.info(">>> Step 2/8: Copying Mosaic to GeoServer Storage...")
+        # Phase 4: Update progress
+        update_job_progress('Copying mosaic to GeoServer storage', 45)
         try:
             copy_to_geoserver_storage(mosaic_image, flight_name + ".tif")
             msg += "\nMosaic pushed to GeoServer storage OK"
@@ -689,6 +705,8 @@ def run_thermal_processing(flight_path_arg, job_id=None):
 
         # --- Log: Footprint Creation ---
         logger.info(">>> Step 3/8: Creating Footprint and pushing to PostGIS...")
+        # Phase 4: Update progress
+        update_job_progress('Creating footprint', 50)
         create_mosaic_footprint_as_line(files, raw_img_folder, flight_timestamp, mosaic_image, engine, footprint, output_geopackage)
         msg += "\nFootprint produced and pushed to PostGIS OK"
         logger.info('Footprint produced and pushed to PostGIS OK') 
@@ -711,6 +729,8 @@ def run_thermal_processing(flight_path_arg, job_id=None):
 
         # --- Log: Hotspot Analysis ---
         logger.info(">>> Step 6/8: Analyzing Hotspots (Intersects)...")
+        # Phase 4: Update progress
+        update_job_progress('Analyzing hotspots and creating boundaries', 60)
         all_images_with_hotspots = create_boundaries_and_centroids(flight_timestamp, kml_boundaries_file, bboxes, engine, output_geopackage)
         if not all_images_with_hotspots:
             msg += "\nNO HOTSPOTS FOUND!!!"
@@ -722,6 +742,8 @@ def run_thermal_processing(flight_path_arg, job_id=None):
         # --- Log: Image Conversion ---
         count = len(all_images_with_hotspots)
         logger.info(f">>> Step 7/8: Converting {count} Hotspot Images (PNG to TIF)...")
+        # Phase 4: Update progress
+        update_job_progress('Converting hotspot images to TIF', 70)
         converted_count = 0
         failed_count = 0
         if len(all_images_with_hotspots) > 0:
@@ -741,6 +763,8 @@ def run_thermal_processing(flight_path_arg, job_id=None):
 
         # --- Log: GeoServer Publishing ---
         logger.info(">>> Step 8/8: Publishing to GeoServer...")
+        # Phase 4: Update progress
+        update_job_progress('Publishing to GeoServer', 80)
         if mosaic_stored_ok:
             publish_image_on_geoserver(flight_name)
             msg += "\nMosaic published on geoserver OK"
@@ -758,6 +782,9 @@ def run_thermal_processing(flight_path_arg, job_id=None):
         if all_images_with_hotspots:
             msg += f"\nPublished {len(all_images_with_hotspots)} individual hotspot images to geoserver OK."
             logger.info(f"Published {len(all_images_with_hotspots)} individual hotspot images to geoserver OK.")
+        
+        # Phase 4: Update progress to near completion
+        update_job_progress('Finalizing processing', 95)
 
     except Exception as e:
         # If ANY of the steps in the 'try' block fails, the code will jump directly here.
@@ -814,6 +841,14 @@ def run_thermal_processing(flight_path_arg, job_id=None):
                 job.log_file_path = log_file_path if 'log_file_path' in locals() else ''
                 job.output_geopackage_path = output_geopackage if 'output_geopackage' in locals() else ''
                 
+                # Phase 4: Save processing statistics
+                if 'files' in locals():
+                    job.total_images_processed = len(files)
+                if 'all_images_with_hotspots' in locals():
+                    job.hotspots_detected = len(all_images_with_hotspots)
+                if 'footprint' in locals() and hasattr(footprint, 'districts'):
+                    job.districts_covered = footprint.districts
+                
                 # Update status if not already set by ImportsProcessor
                 if success and job.status != 'COMPLETED':
                     job.status = 'COMPLETED'
@@ -825,7 +860,7 @@ def run_thermal_processing(flight_path_arg, job_id=None):
                     job.error_message = error_details
                 
                 job.save()
-                logger.info(f"Job {job.id} final results saved: status={job.status}")
+                logger.info(f"Job {job.id} final results saved: status={job.status}, images={job.total_images_processed}, hotspots={job.hotspots_detected}")
             except Exception as e:
                 logger.error(f"Error saving final job results: {e}", exc_info=True)
 
