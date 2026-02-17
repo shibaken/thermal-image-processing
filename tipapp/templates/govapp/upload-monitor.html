@@ -217,11 +217,18 @@
         function refreshTable() {
             if (jobsTable) {
                 console.log('[Auto-refresh] Fetching jobs data...');
+                
+                // Save current scroll position
+                const scrollPosition = window.pageYOffset || document.documentElement.scrollTop;
+                
                 loadJobsData().then(jobs => {
                     console.log(`[Auto-refresh] Loaded ${jobs.length} jobs`);
                     jobsTable.clear();
                     jobsTable.rows.add(jobs);
-                    jobsTable.draw();
+                    jobsTable.draw(false); // false = don't reset pagination
+                    
+                    // Restore scroll position
+                    window.scrollTo(0, scrollPosition);
                 }).catch(error => {
                     console.error('[Auto-refresh] Error refreshing table:', error);
                     // Continue polling even if there's an error
@@ -349,8 +356,9 @@
                             // Add download button for original file if file_path exists
                             if (row.file_path) {
                                 let downloadPath = row.file_path;
-                                // If job is completed or failed, file has been moved to thermal_files_uploaded
-                                if (row.status === 'COMPLETED' || row.status === 'FAILED') {
+                                // File is moved to thermal_files_uploaded after unzipping (during PROCESSING)
+                                // Only UPLOADED and QUEUED jobs have files in pending_imports
+                                if (row.status !== 'UPLOADED' && row.status !== 'QUEUED') {
                                     downloadPath = row.file_path.replace('/pending_imports/', '/thermal_files_uploaded/');
                                 }
                                 buttons += ` <a href="/api/thermal-files/download/?file_path=${encodeURIComponent(downloadPath)}" 
