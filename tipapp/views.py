@@ -44,7 +44,7 @@ class HomePage(base.TemplateView):
 
 
 class ThermalFilesDashboardView(base.TemplateView):
-    """Thermal files view."""
+    """Processed data view - Browse and download completed thermal processing results."""
     template_name = "govapp/thermal-files/dashboard.html"
 
     def get(self, request: http.HttpRequest, *args: Any, **kwargs: Any) -> http.HttpResponse:
