@@ -332,7 +332,8 @@ def api_download_thermal_file_or_folder(request, *args, **kwargs):
     #    These are the only top-level directories this view is allowed to serve files from.
     allowed_base_paths = [
         os.path.abspath(settings.DATA_STORAGE),
-        os.path.abspath(settings.UPLOADS_HISTORY_PATH)
+        os.path.abspath(settings.UPLOADS_HISTORY_PATH),
+        os.path.abspath(settings.PENDING_IMPORT_PATH)
     ]
 
     # 2. Normalize the user-provided path to resolve any '..' components and get the real absolute path.
@@ -523,6 +524,7 @@ def list_processing_jobs(request, *args, **kwargs):
             'current_step': job.current_step,
             'uploaded_by_email': job.uploaded_by_email,
             'file_size': job.file_size,
+            'file_path': job.file_path,
             'created_at': job.created_at.isoformat(),
             'processing_started_at': job.processing_started_at.isoformat() if job.processing_started_at else None,
             'processing_completed_at': job.processing_completed_at.isoformat() if job.processing_completed_at else None,

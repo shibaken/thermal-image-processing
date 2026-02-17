@@ -60,6 +60,7 @@
                                 <th>ID</th>
                                 <th>Flight Name</th>
                                 <th>Status</th>
+                                <th>File Size</th>
                                 <th>Progress</th>
                                 <th>Current Step</th>
                                 <th>Uploader</th>
@@ -257,6 +258,17 @@
                         }
                     },
                     { 
+                        data: 'file_size',
+                        title: 'File Size',
+                        width: '100px',
+                        render: function(data, type, row) {
+                            if (type === 'display') {
+                                return `<small>${formatFileSize(data)}</small>`;
+                            }
+                            return data;
+                        }
+                    },
+                    { 
                         data: null,
                         title: 'Progress',
                         width: '150px',
@@ -315,16 +327,32 @@
                     { 
                         data: null,
                         title: 'Actions',
-                        width: '100px',
+                        width: '180px',
                         orderable: false,
                         render: function(data, type, row) {
-                            return `<button class="btn btn-sm btn-info" onclick="showJobDetails(${row.id})">
-                                <i class="bi bi-eye"></i> Details
+                            let buttons = `<button class="btn btn-sm btn-primary mb-1" onclick="showJobDetails(${row.id})">
+                                <i class="bi bi-eye"></i> View
                             </button>`;
+                            
+                            // Add download button for original file if file_path exists
+                            if (row.file_path) {
+                                let downloadPath = row.file_path;
+                                // If job is completed or failed, file has been moved to thermal_files_uploaded
+                                if (row.status === 'COMPLETED' || row.status === 'FAILED') {
+                                    downloadPath = row.file_path.replace('/pending_imports/', '/thermal_files_uploaded/');
+                                }
+                                buttons += ` <a href="/api/thermal-files/download/?file_path=${encodeURIComponent(downloadPath)}" 
+                                               class="btn btn-sm btn-primary mb-1" 
+                                               title="Download Original File">
+                                    <i class="bi bi-download"></i> Download
+                                </a>`;
+                            }
+                            
+                            return buttons;
                         }
                     }
                 ],
-                order: [[6, 'desc']], // Sort by created_at descending
+                order: [[7, 'desc']], // Sort by created_at descending
                 pageLength: 25,
                 lengthMenu: [[10, 25, 50, 100, -1], [10, 25, 50, 100, "All"]],
                 language: {
