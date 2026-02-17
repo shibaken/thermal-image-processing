@@ -105,11 +105,14 @@ class ImportsProcessor():
                     # Phase 3: Update job status to COMPLETED
                     if job:
                         try:
+                            # Refresh from DB to get latest values set by run_thermal_processing
+                            job.refresh_from_db()
                             job.status = 'COMPLETED'
                             job.processing_completed_at = timezone.now()
                             job.current_step = 'Processing completed successfully'
                             job.progress_percentage = 100
-                            job.save()
+                            # Save only the fields we're updating to preserve processing results
+                            job.save(update_fields=['status', 'processing_completed_at', 'current_step', 'progress_percentage'])
                             logger.info(f"Job {job.id} status updated to COMPLETED")
                         except Exception as e:
                             logger.error(f"Error updating job completion status: {e}", exc_info=True)
@@ -124,11 +127,14 @@ class ImportsProcessor():
                     # Phase 3: Update job status to FAILED
                     if job:
                         try:
+                            # Refresh from DB to get latest values
+                            job.refresh_from_db()
                             job.status = 'FAILED'
                             job.processing_completed_at = timezone.now()
                             job.error_message = str(e)
                             job.current_step = 'Processing failed'
-                            job.save()
+                            # Save only the fields we're updating
+                            job.save(update_fields=['status', 'processing_completed_at', 'error_message', 'current_step'])
                             logger.info(f"Job {job.id} status updated to FAILED")
                         except Exception as update_error:
                             logger.error(f"Error updating job failure status: {update_error}", exc_info=True)

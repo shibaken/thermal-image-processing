@@ -25,40 +25,27 @@
                     </div>
                 </div>
 
-                <!-- Auto-refresh indicator -->
-                <div class="alert alert-info d-flex align-items-center" role="alert">
-                    <span>Auto-refreshing every 5 seconds. Last updated: <strong id="last-updated">-</strong></span>
-                </div>
-
                 <!-- Jobs Table -->
                 <div class="table-responsive">
-                    <table class="table table-striped table-hover">
+                    <table id="jobs-table" class="table table-striped table-hover" style="width:100%">
                         <thead>
                             <tr>
-                                <th class="sortable" data-sort="id" style="cursor: pointer;">ID <span class="sort-icon"></span></th>
-                                <th class="sortable" data-sort="flight_name" style="cursor: pointer;">Flight Name <span class="sort-icon"></span></th>
-                                <th class="sortable" data-sort="status" style="cursor: pointer;">Status <span class="sort-icon"></span></th>
+                                <th>ID</th>
+                                <th>Flight Name</th>
+                                <th>Status</th>
                                 <th>Progress</th>
                                 <th>Current Step</th>
-                                <th class="sortable" data-sort="uploaded_by_email" style="cursor: pointer;">Uploader <span class="sort-icon"></span></th>
-                                <th class="sortable" data-sort="created_at" style="cursor: pointer;">Created <span class="sort-icon"></span></th>
+                                <th>Uploader</th>
+                                <th>Created</th>
                                 <th>Duration</th>
                                 <th>Actions</th>
                             </tr>
                         </thead>
-                        <tbody id="jobs-tbody">
-                            <tr>
-                                <td colspan="9" class="text-center">Loading...</td>
-                            </tr>
+                        <tbody>
+                            <!-- DataTable will populate this -->
                         </tbody>
                     </table>
                 </div>
-
-                <!-- Pagination Controls -->
-                <nav aria-label="Jobs pagination">
-                    <ul class="pagination justify-content-center" id="pagination-controls">
-                    </ul>
-                </nav>
             </div>
         </div>
 
@@ -82,293 +69,272 @@
     </div>
 
     <script>
-        // Processing Jobs Dashboard JavaScript
-        const ProcessingJobsDashboard = {
-            currentPage: 1,
-            pageSize: 20,
-            autoRefreshInterval: null,
-            statusFilter: '',
-            sortBy: '-created_at',
-            sortDirection: 'desc',
+        // DataTable instance
+        let jobsTable = null;
+        let autoRefreshInterval = null;
 
-            init() {
-                console.log('ProcessingJobsDashboard.init() called');
-                this.setupEventListeners();
-                this.loadJobs();
-                this.startAutoRefresh();
-            },
+        // Helper functions
+        function getStatusBadge(status, display) {
+            const badges = {
+                'UPLOADED': 'bg-secondary',
+                'QUEUED': 'bg-info',
+                'PROCESSING': 'bg-primary',
+                'COMPLETED': 'bg-success',
+                'FAILED': 'bg-danger'
+            };
+            return `<span class="badge ${badges[status] || 'bg-secondary'}">${display}</span>`;
+        }
 
-            setupEventListeners() {
-                console.log('Setting up event listeners...');
-                const statusFilter = document.getElementById('status-filter');
-                
-                if (!statusFilter) {
-                    console.error('Status filter not found!');
-                    return;
-                }
-                
-                // Auto-apply filter when status changes
-                statusFilter.addEventListener('change', (e) => {
-                    console.log('Status filter changed to:', e.target.value);
-                    this.statusFilter = e.target.value;
-                    this.currentPage = 1;
-                    this.loadJobs();
-                });
+        function getProgressBarClass(status) {
+            const classes = {
+                'UPLOADED': '',
+                'QUEUED': 'bg-info',
+                'PROCESSING': 'progress-bar-striped progress-bar-animated',
+                'COMPLETED': 'bg-success',
+                'FAILED': 'bg-danger'
+            };
+            return classes[status] || '';
+        }
 
-                // Add sort listeners to table headers
-                document.querySelectorAll('th.sortable').forEach(th => {
-                    th.addEventListener('click', () => {
-                        const sortField = th.getAttribute('data-sort');
-                        this.handleSort(sortField);
-                    });
-                });
-                
-                console.log('Event listeners setup complete');
-            },
+        function formatDateTime(isoString) {
+            if (!isoString) return '-';
+            const date = new Date(isoString);
+            return date.toLocaleString();
+        }
 
-            handleSort(field) {
-                console.log('Sorting by:', field);
-                
-                // Toggle direction if same field, otherwise default to descending
-                if (this.sortBy === field || this.sortBy === '-' + field) {
-                    // Toggle direction
-                    if (this.sortBy.startsWith('-')) {
-                        this.sortBy = field;
-                        this.sortDirection = 'asc';
-                    } else {
-                        this.sortBy = '-' + field;
-                        this.sortDirection = 'desc';
-                    }
-                } else {
-                    this.sortBy = '-' + field;
-                    this.sortDirection = 'desc';
-                }
-                
-                this.updateSortIcons(field);
-                this.loadJobs();
-            },
+        function formatDuration(seconds) {
+            if (!seconds) return '-';
+            const hours = Math.floor(seconds / 3600);
+            const minutes = Math.floor((seconds % 3600) / 60);
+            const secs = Math.floor(seconds % 60);
+            return `${hours}h ${minutes}m ${secs}s`;
+        }
 
-            updateSortIcons(activeField) {
-                // Remove all sort icons
-                document.querySelectorAll('th.sortable .sort-icon').forEach(icon => {
-                    icon.innerHTML = '';
-                });
-                
-                // Add icon to active column
-                const activeTh = document.querySelector(`th.sortable[data-sort="${activeField}"]`);
-                if (activeTh) {
-                    const icon = activeTh.querySelector('.sort-icon');
-                    if (this.sortDirection === 'asc') {
-                        icon.innerHTML = ' ↑';
-                    } else {
-                        icon.innerHTML = ' ↓';
-                    }
-                }
-            },
+        function formatFileSize(bytes) {
+            if (!bytes) return '-';
+            const mb = bytes / (1024 * 1024);
+            return `${mb.toFixed(2)} MB`;
+        }
 
-            async loadJobs() {
-                try {
-                    let url = `/api/processing-jobs/?page=${this.currentPage}&page_size=${this.pageSize}&sort_by=${this.sortBy}`;
-                    if (this.statusFilter) url += `&status=${this.statusFilter}`;
+        async function showJobDetails(jobId) {
+            try {
+                const response = await fetch(`/api/processing-jobs/${jobId}/`);
+                const job = await response.json();
 
-                    console.log('Loading jobs from:', url);
-                    const response = await fetch(url);
-                    
-                    if (!response.ok) {
-                        throw new Error(`HTTP error! status: ${response.status}`);
-                    }
-                    
-                    const data = await response.json();
-                    console.log('Received data:', data);
-
-                    this.renderJobs(data.results);
-                    this.renderPagination(data);
-                    this.updateLastUpdated();
-                } catch (error) {
-                    console.error('Error loading jobs:', error);
-                    document.getElementById('jobs-tbody').innerHTML = 
-                        `<tr><td colspan="9" class="text-center text-danger">Error loading jobs: ${error.message}</td></tr>`;
-                }
-            },
-
-            renderJobs(jobs) {
-                const tbody = document.getElementById('jobs-tbody');
-                if (jobs.length === 0) {
-                    tbody.innerHTML = '<tr><td colspan="9" class="text-center">No jobs found</td></tr>';
-                    return;
-                }
-
-                tbody.innerHTML = jobs.map(job => `
-                    <tr>
-                        <td>${job.id}</td>
-                        <td><strong>${job.flight_name}</strong><br><small class="text-muted">${job.original_filename}</small></td>
-                        <td>${this.getStatusBadge(job.status, job.status_display)}</td>
-                        <td>
-                            <div class="progress" style="height: 20px;">
-                                <div class="progress-bar ${this.getProgressBarClass(job.status)}" 
-                                     role="progressbar" 
-                                     style="width: ${job.progress_percentage}%"
-                                     aria-valuenow="${job.progress_percentage}" 
-                                     aria-valuemin="0" 
-                                     aria-valuemax="100">
-                                    ${job.progress_percentage}%
-                                </div>
-                            </div>
-                        </td>
-                        <td><small>${job.current_step || '-'}</small></td>
-                        <td><small>${job.uploaded_by_email}</small></td>
-                        <td><small>${this.formatDateTime(job.created_at)}</small></td>
-                        <td><small>${job.duration_seconds ? this.formatDuration(job.duration_seconds) : '-'}</small></td>
-                        <td>
-                            <button class="btn btn-sm btn-info" onclick="ProcessingJobsDashboard.showJobDetails(${job.id})">
-                                <i class="bi bi-eye"></i> Details
-                            </button>
-                        </td>
-                    </tr>
-                `).join('');
-            },
-
-            getStatusBadge(status, display) {
-                const badges = {
-                    'UPLOADED': 'bg-secondary',
-                    'QUEUED': 'bg-info',
-                    'PROCESSING': 'bg-primary',
-                    'COMPLETED': 'bg-success',
-                    'FAILED': 'bg-danger'
-                };
-                return `<span class="badge ${badges[status] || 'bg-secondary'}">${display}</span>`;
-            },
-
-            getProgressBarClass(status) {
-                const classes = {
-                    'UPLOADED': '',
-                    'QUEUED': 'bg-info',
-                    'PROCESSING': 'progress-bar-striped progress-bar-animated',
-                    'COMPLETED': 'bg-success',
-                    'FAILED': 'bg-danger'
-                };
-                return classes[status] || '';
-            },
-
-            renderPagination(data) {
-                const controls = document.getElementById('pagination-controls');
-                let html = '';
-
-                // Previous button
-                html += `<li class="page-item ${!data.has_previous ? 'disabled' : ''}">
-                    <a class="page-link" href="#" onclick="ProcessingJobsDashboard.goToPage(${data.current_page - 1}); return false;">Previous</a>
-                </li>`;
-
-                // Page numbers
-                for (let i = 1; i <= data.num_pages; i++) {
-                    html += `<li class="page-item ${i === data.current_page ? 'active' : ''}">
-                        <a class="page-link" href="#" onclick="ProcessingJobsDashboard.goToPage(${i}); return false;">${i}</a>
-                    </li>`;
-                }
-
-                // Next button
-                html += `<li class="page-item ${!data.has_next ? 'disabled' : ''}">
-                    <a class="page-link" href="#" onclick="ProcessingJobsDashboard.goToPage(${data.current_page + 1}); return false;">Next</a>
-                </li>`;
-
-                controls.innerHTML = html;
-            },
-
-            goToPage(page) {
-                this.currentPage = page;
-                this.loadJobs();
-            },
-
-            async showJobDetails(jobId) {
-                try {
-                    const response = await fetch(`/api/processing-jobs/${jobId}/`);
-                    const job = await response.json();
-
-                    const content = `
-                        <div class="row">
-                            <div class="col-md-6">
-                                <p><strong>ID:</strong> ${job.id}</p>
-                                <p><strong>Flight Name:</strong> ${job.flight_name}</p>
-                                <p><strong>Original Filename:</strong> ${job.original_filename}</p>
-                                <p><strong>Status:</strong> ${this.getStatusBadge(job.status, job.status_display)}</p>
-                                <p><strong>Progress:</strong> ${job.progress_percentage}%</p>
-                                <p><strong>Current Step:</strong> ${job.current_step || '-'}</p>
-                            </div>
-                            <div class="col-md-6">
-                                <p><strong>Uploader:</strong> ${job.uploaded_by_email}</p>
-                                <p><strong>File Size:</strong> ${this.formatFileSize(job.file_size)}</p>
-                                <p><strong>Created:</strong> ${this.formatDateTime(job.created_at)}</p>
-                                <p><strong>Started:</strong> ${job.processing_started_at ? this.formatDateTime(job.processing_started_at) : '-'}</p>
-                                <p><strong>Completed:</strong> ${job.processing_completed_at ? this.formatDateTime(job.processing_completed_at) : '-'}</p>
-                                <p><strong>Duration:</strong> ${job.duration_formatted || '-'}</p>
-                            </div>
+                const content = `
+                    <div class="row">
+                        <div class="col-md-6">
+                            <p><strong>ID:</strong> ${job.id}</p>
+                            <p><strong>Flight Name:</strong> ${job.flight_name}</p>
+                            <p><strong>Original Filename:</strong> ${job.original_filename}</p>
+                            <p><strong>Status:</strong> ${getStatusBadge(job.status, job.status_display)}</p>
+                            <p><strong>Progress:</strong> ${job.progress_percentage}%</p>
+                            <p><strong>Current Step:</strong> ${job.current_step || '-'}</p>
                         </div>
-                        <hr>
-                        <div class="row">
-                            <div class="col-md-12">
-                                <p><strong>Images Processed:</strong> ${job.total_images_processed || 0}</p>
-                                <p><strong>Hotspots Detected:</strong> ${job.hotspots_detected || 0}</p>
-                                <p><strong>Districts Covered:</strong> ${job.districts_covered ? job.districts_covered.join(', ') : '-'}</p>
-                                ${job.output_geopackage_path ? `<p><strong>Output:</strong> <code>${job.output_geopackage_path}</code></p>` : ''}
-                                ${job.log_file_path ? `<p><strong>Log File:</strong> <code>${job.log_file_path}</code></p>` : ''}
-                                ${job.error_message ? `<div class="alert alert-danger"><strong>Error:</strong> ${job.error_message}</div>` : ''}
-                            </div>
+                        <div class="col-md-6">
+                            <p><strong>Uploader:</strong> ${job.uploaded_by_email}</p>
+                            <p><strong>File Size:</strong> ${formatFileSize(job.file_size)}</p>
+                            <p><strong>Created:</strong> ${formatDateTime(job.created_at)}</p>
+                            <p><strong>Started:</strong> ${formatDateTime(job.processing_started_at)}</p>
+                            <p><strong>Completed:</strong> ${formatDateTime(job.processing_completed_at)}</p>
+                            <p><strong>Duration:</strong> ${formatDuration(job.duration_seconds)}</p>
                         </div>
-                    `;
+                    </div>
+                    <hr>
+                    <div class="row">
+                        <div class="col-md-12">
+                            <p><strong>Images Processed:</strong> ${job.total_images_processed || 0}</p>
+                            <p><strong>Hotspots Detected:</strong> ${job.hotspots_detected || 0}</p>
+                            <p><strong>Districts Covered:</strong> ${job.districts_covered ? job.districts_covered.join(', ') : '-'}</p>
+                            ${job.output_geopackage_path ? `<p><strong>Output:</strong> ${job.output_geopackage_path}</p>` : ''}
+                            ${job.log_file_path ? `<p><strong>Log File:</strong> ${job.log_file_path}</p>` : ''}
+                            ${job.error_message ? `<div class="alert alert-danger"><strong>Error:</strong> ${job.error_message}</div>` : ''}
+                        </div>
+                    </div>
+                `;
 
-                    document.getElementById('job-details-content').innerHTML = content;
-                    const modal = new bootstrap.Modal(document.getElementById('job-details-modal'));
-                    modal.show();
-                } catch (error) {
-                    console.error('Error loading job details:', error);
-                    alert('Error loading job details');
-                }
-            },
-
-            formatDateTime(isoString) {
-                const date = new Date(isoString);
-                return date.toLocaleString();
-            },
-
-            formatDuration(seconds) {
-                const hours = Math.floor(seconds / 3600);
-                const minutes = Math.floor((seconds % 3600) / 60);
-                const secs = Math.floor(seconds % 60);
-                return `${hours}h ${minutes}m ${secs}s`;
-            },
-
-            formatFileSize(bytes) {
-                if (!bytes) return '-';
-                const mb = bytes / (1024 * 1024);
-                return `${mb.toFixed(2)} MB`;
-            },
-
-            updateLastUpdated() {
-                document.getElementById('last-updated').textContent = new Date().toLocaleTimeString();
-            },
-
-            startAutoRefresh() {
-                this.autoRefreshInterval = setInterval(() => {
-                    this.loadJobs();
-                }, 5000); // Refresh every 5 seconds
-            },
-
-            stopAutoRefresh() {
-                if (this.autoRefreshInterval) {
-                    clearInterval(this.autoRefreshInterval);
-                }
+                document.getElementById('job-details-content').innerHTML = content;
+                const modal = new bootstrap.Modal(document.getElementById('job-details-modal'));
+                modal.show();
+            } catch (error) {
+                console.error('Error loading job details:', error);
+                alert('Error loading job details');
             }
-        };
+        }
 
-        // Initialize on page load
-        document.addEventListener('DOMContentLoaded', () => {
-            console.log('DOM loaded, initializing dashboard...');
-            ProcessingJobsDashboard.init();
+        async function loadJobsData() {
+            try {
+                const response = await fetch('/api/processing-jobs/?page_size=1000');
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                const data = await response.json();
+                return data.results;
+            } catch (error) {
+                console.error('Error loading jobs:', error);
+                return [];
+            }
+        }
+
+        function refreshTable() {
+            if (jobsTable) {
+                loadJobsData().then(jobs => {
+                    jobsTable.clear();
+                    jobsTable.rows.add(jobs);
+                    jobsTable.draw();
+                });
+            }
+        }
+
+        // Initialize DataTable
+        document.addEventListener('DOMContentLoaded', async function() {
+            console.log('Initializing Processing Jobs Dashboard with DataTable...');
+            
+            // Load initial data
+            const jobs = await loadJobsData();
+            
+            // Initialize DataTable
+            jobsTable = $('#jobs-table').DataTable({
+                data: jobs,
+                columns: [
+                    { 
+                        data: 'id',
+                        title: 'ID',
+                        width: '50px'
+                    },
+                    { 
+                        data: null,
+                        title: 'Flight Name',
+                        render: function(data, type, row) {
+                            if (type === 'display') {
+                                return `<strong>${row.flight_name}</strong><br><small class="text-muted">${row.original_filename}</small>`;
+                            }
+                            return row.flight_name;
+                        }
+                    },
+                    { 
+                        data: null,
+                        title: 'Status',
+                        width: '100px',
+                        render: function(data, type, row) {
+                            if (type === 'display') {
+                                return getStatusBadge(row.status, row.status_display);
+                            }
+                            return row.status;
+                        }
+                    },
+                    { 
+                        data: null,
+                        title: 'Progress',
+                        width: '150px',
+                        orderable: false,
+                        render: function(data, type, row) {
+                            if (type === 'display') {
+                                return `
+                                    <div class="progress" style="height: 20px;">
+                                        <div class="progress-bar ${getProgressBarClass(row.status)}" 
+                                             role="progressbar" 
+                                             style="width: ${row.progress_percentage}%"
+                                             aria-valuenow="${row.progress_percentage}" 
+                                             aria-valuemin="0" 
+                                             aria-valuemax="100">
+                                            ${row.progress_percentage}%
+                                        </div>
+                                    </div>
+                                `;
+                            }
+                            return row.progress_percentage;
+                        }
+                    },
+                    { 
+                        data: 'current_step',
+                        title: 'Current Step',
+                        width: '150px',
+                        render: function(data, type, row) {
+                            return data ? `<small>${data}</small>` : '-';
+                        }
+                    },
+                    { 
+                        data: 'uploaded_by_email',
+                        title: 'Uploader',
+                        render: function(data, type, row) {
+                            return `<small>${data}</small>`;
+                        }
+                    },
+                    { 
+                        data: 'created_at',
+                        title: 'Created',
+                        render: function(data, type, row) {
+                            if (type === 'display') {
+                                return `<small>${formatDateTime(data)}</small>`;
+                            }
+                            return data;
+                        }
+                    },
+                    { 
+                        data: 'duration_seconds',
+                        title: 'Duration',
+                        width: '100px',
+                        render: function(data, type, row) {
+                            return `<small>${formatDuration(data)}</small>`;
+                        }
+                    },
+                    { 
+                        data: null,
+                        title: 'Actions',
+                        width: '100px',
+                        orderable: false,
+                        render: function(data, type, row) {
+                            return `<button class="btn btn-sm btn-info" onclick="showJobDetails(${row.id})">
+                                View
+                            </button>`;
+                        }
+                    }
+                ],
+                order: [[6, 'desc']], // Sort by created_at descending
+                pageLength: 25,
+                lengthMenu: [[10, 25, 50, 100, -1], [10, 25, 50, 100, "All"]],
+                language: {
+                    search: "Search jobs:",
+                    lengthMenu: "Show _MENU_ jobs per page",
+                    info: "Showing _START_ to _END_ of _TOTAL_ jobs",
+                    infoEmpty: "No jobs available",
+                    infoFiltered: "(filtered from _MAX_ total jobs)",
+                    zeroRecords: "No matching jobs found",
+                    emptyTable: "No processing jobs available"
+                },
+                dom: '<"row"<"col-sm-12 col-md-6"l><"col-sm-12 col-md-6"f>>' +
+                     '<"row"<"col-sm-12"tr>>' +
+                     '<"row"<"col-sm-12 col-md-5"i><"col-sm-12 col-md-7"p>>',
+                responsive: true
+            });
+
+            // Setup status filter
+            $('#status-filter').on('change', function() {
+                const selectedStatus = this.value;
+                
+                // Use DataTable search on the Status column (column index 2)
+                if (selectedStatus === '') {
+                    // Show all - clear the filter
+                    jobsTable.column(2).search('').draw();
+                } else {
+                    // Filter by exact status match
+                    jobsTable.column(2).search('^' + selectedStatus + '$', true, false).draw();
+                }
+            });
+
+            // Start auto-refresh (interval from settings)
+            const refreshInterval = {{ auto_refresh_interval|default:5 }} * 1000; // Convert seconds to milliseconds
+            autoRefreshInterval = setInterval(refreshTable, refreshInterval);
+            
+            console.log('DataTable initialized successfully with', refreshInterval / 1000, 'seconds auto-refresh');
         });
 
         // Stop auto-refresh when leaving page
         window.addEventListener('beforeunload', () => {
-            ProcessingJobsDashboard.stopAutoRefresh();
+            if (autoRefreshInterval) {
+                clearInterval(autoRefreshInterval);
+            }
         });
     </script>
 </div>

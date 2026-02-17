@@ -611,8 +611,10 @@ class ProcessingJobsDashboardView(base.TemplateView):
     def get(self, request: http.HttpRequest, *args: Any, **kwargs: Any) -> http.HttpResponse:
         """Render the processing jobs dashboard page."""
         from tipapp.permissions import has_admin_or_officer_permission
+        from django.conf import settings
         
         context: dict[str, Any] = {
-            'has_permission': has_admin_or_officer_permission(request)
+            'has_permission': has_admin_or_officer_permission(request),
+            'auto_refresh_interval': settings.DASHBOARD_AUTO_REFRESH_INTERVAL,
         }
         return shortcuts.render(request, self.template_name, context)
