@@ -1,0 +1,379 @@
+{% extends 'govapp/base.html' %} 
+
+{% block content %}
+{% if request.user.is_authenticated is True and has_view_permission is True %}
+
+<div class="container">
+    <div class="upload-monitor-page my-1">
+        
+        <!-- Upload Section -->
+        <div class="card rounded-3 shadow-sm mb-4" id="droppable-area">
+            <div class="card-header py-3 bg-primary text-white">
+                <h4 class="my-0 fw-bold"><i class="bi bi-cloud-upload"></i> Upload Files</h4>
+            </div>
+            <div class="card-body">
+                {% if has_upload_permission is True %}
+                <p class="text-muted mb-3">
+                    <i class="bi bi-info-circle"></i> 
+                    Upload thermal imaging files (.7z or .zip). After upload, files will appear as "Queued" in the Processing Jobs table below.
+                </p>
+                <div class="file-upload">{% include 'govapp/thermal-files/upload-file-component.html' %}</div>
+                {% else %}
+                <div class="alert alert-warning" role="alert">
+                    <i class="bi bi-exclamation-triangle"></i> You do not have permission to upload files.
+                </div>
+                {% endif %}
+            </div>
+        </div>
+
+        <!-- Processing Jobs Section -->
+        <div class="card rounded-3 shadow-sm">
+            <div class="card-header py-3 bg-success text-white">
+                <h4 class="my-0 fw-bold"><i class="bi bi-speedometer2"></i> Processing Jobs</h4>
+            </div>
+            <div class="card-body">
+                <p class="text-muted mb-3">
+                    <i class="bi bi-info-circle"></i> 
+                    Monitor all thermal processing jobs. Use the status filter to view specific job states.
+                </p>
+                
+                <!-- Filter Controls -->
+                <div class="row mb-3">
+                    <div class="col-md-4">
+                        <label for="status-filter" class="form-label">Status Filter</label>
+                        <select id="status-filter" class="form-select">
+                            <option value="">All Statuses</option>
+                            <option value="UPLOADED">Uploaded</option>
+                            <option value="QUEUED">Queued</option>
+                            <option value="PROCESSING">Processing</option>
+                            <option value="COMPLETED">Completed</option>
+                            <option value="FAILED">Failed</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- Jobs Table -->
+                <div class="table-responsive">
+                    <table id="jobs-table" class="table table-striped table-hover" style="width:100%">
+                        <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>Flight Name</th>
+                                <th>Status</th>
+                                <th>Progress</th>
+                                <th>Current Step</th>
+                                <th>Uploader</th>
+                                <th>Created</th>
+                                <th>Duration</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <!-- DataTable will populate this -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Job Details Modal -->
+        <div class="modal fade" id="job-details-modal" tabindex="-1" aria-labelledby="jobDetailsModalLabel" aria-hidden="true">
+            <div class="modal-dialog modal-lg">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title" id="jobDetailsModalLabel">Job Details</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                    </div>
+                    <div class="modal-body" id="job-details-content">
+                        Loading...
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Upload functionality script -->
+    <script>
+        tip_upload.init()
+    </script>
+
+    <!-- Processing Jobs Monitor script -->
+    <script>
+        // DataTable instance
+        let jobsTable = null;
+        let autoRefreshInterval = null;
+
+        // Helper functions
+        function getStatusBadge(status, display) {
+            const badges = {
+                'UPLOADED': 'bg-secondary',
+                'QUEUED': 'bg-info',
+                'PROCESSING': 'bg-primary',
+                'COMPLETED': 'bg-success',
+                'FAILED': 'bg-danger'
+            };
+            return `<span class="badge ${badges[status] || 'bg-secondary'}">${display}</span>`;
+        }
+
+        function getProgressBarClass(status) {
+            const classes = {
+                'UPLOADED': '',
+                'QUEUED': 'bg-info',
+                'PROCESSING': 'progress-bar-striped progress-bar-animated',
+                'COMPLETED': 'bg-success',
+                'FAILED': 'bg-danger'
+            };
+            return classes[status] || '';
+        }
+
+        function formatDateTime(isoString) {
+            if (!isoString) return '-';
+            const date = new Date(isoString);
+            return date.toLocaleString();
+        }
+
+        function formatDuration(seconds) {
+            if (!seconds) return '-';
+            const hours = Math.floor(seconds / 3600);
+            const minutes = Math.floor((seconds % 3600) / 60);
+            const secs = Math.floor(seconds % 60);
+            return `${hours}h ${minutes}m ${secs}s`;
+        }
+
+        function formatFileSize(bytes) {
+            if (!bytes) return '-';
+            const mb = bytes / (1024 * 1024);
+            return `${mb.toFixed(2)} MB`;
+        }
+
+        async function showJobDetails(jobId) {
+            try {
+                const response = await fetch(`/api/processing-jobs/${jobId}/`);
+                const job = await response.json();
+
+                const content = `
+                    <div class="row">
+                        <div class="col-md-6">
+                            <p><strong>ID:</strong> ${job.id}</p>
+                            <p><strong>Flight Name:</strong> ${job.flight_name}</p>
+                            <p><strong>Original Filename:</strong> ${job.original_filename}</p>
+                            <p><strong>Status:</strong> ${getStatusBadge(job.status, job.status_display)}</p>
+                            <p><strong>Progress:</strong> ${job.progress_percentage}%</p>
+                            <p><strong>Current Step:</strong> ${job.current_step || '-'}</p>
+                        </div>
+                        <div class="col-md-6">
+                            <p><strong>Uploader:</strong> ${job.uploaded_by_email}</p>
+                            <p><strong>File Size:</strong> ${formatFileSize(job.file_size)}</p>
+                            <p><strong>Created:</strong> ${formatDateTime(job.created_at)}</p>
+                            <p><strong>Started:</strong> ${formatDateTime(job.processing_started_at)}</p>
+                            <p><strong>Completed:</strong> ${formatDateTime(job.processing_completed_at)}</p>
+                            <p><strong>Duration:</strong> ${formatDuration(job.duration_seconds)}</p>
+                        </div>
+                    </div>
+                    <hr>
+                    <div class="row">
+                        <div class="col-md-12">
+                            <p><strong>Images Processed:</strong> ${job.total_images_processed || 0}</p>
+                            <p><strong>Hotspots Detected:</strong> ${job.hotspots_detected || 0}</p>
+                            <p><strong>Districts Covered:</strong> ${job.districts_covered ? job.districts_covered.join(', ') : '-'}</p>
+                            ${job.output_geopackage_path ? `<p><strong>Output:</strong> <code>${job.output_geopackage_path}</code></p>` : ''}
+                            ${job.log_file_path ? `<p><strong>Log File:</strong> <code>${job.log_file_path}</code></p>` : ''}
+                            ${job.error_message ? `<div class="alert alert-danger"><strong>Error:</strong> ${job.error_message}</div>` : ''}
+                        </div>
+                    </div>
+                `;
+
+                document.getElementById('job-details-content').innerHTML = content;
+                const modal = new bootstrap.Modal(document.getElementById('job-details-modal'));
+                modal.show();
+            } catch (error) {
+                console.error('Error loading job details:', error);
+                alert('Error loading job details');
+            }
+        }
+
+        async function loadJobsData() {
+            try {
+                const response = await fetch('/api/processing-jobs/?page_size=1000');
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                const data = await response.json();
+                return data.results;
+            } catch (error) {
+                console.error('Error loading jobs:', error);
+                return [];
+            }
+        }
+
+        function refreshTable() {
+            if (jobsTable) {
+                loadJobsData().then(jobs => {
+                    jobsTable.clear();
+                    jobsTable.rows.add(jobs);
+                    jobsTable.draw();
+                });
+            }
+        }
+
+        // Initialize DataTable on page load
+        document.addEventListener('DOMContentLoaded', async function() {
+            console.log('Initializing Processing Jobs DataTable...');
+            
+            // Load initial data
+            const jobs = await loadJobsData();
+            
+            // Initialize DataTable
+            jobsTable = $('#jobs-table').DataTable({
+                data: jobs,
+                columns: [
+                    { 
+                        data: 'id',
+                        title: 'ID',
+                        width: '50px'
+                    },
+                    { 
+                        data: null,
+                        title: 'Flight Name',
+                        render: function(data, type, row) {
+                            if (type === 'display') {
+                                return `<strong>${row.flight_name}</strong><br><small class="text-muted">${row.original_filename}</small>`;
+                            }
+                            return row.flight_name;
+                        }
+                    },
+                    { 
+                        data: null,
+                        title: 'Status',
+                        width: '100px',
+                        render: function(data, type, row) {
+                            if (type === 'display') {
+                                return getStatusBadge(row.status, row.status_display);
+                            }
+                            return row.status;
+                        }
+                    },
+                    { 
+                        data: null,
+                        title: 'Progress',
+                        width: '150px',
+                        orderable: false,
+                        render: function(data, type, row) {
+                            if (type === 'display') {
+                                return `
+                                    <div class="progress" style="height: 20px;">
+                                        <div class="progress-bar ${getProgressBarClass(row.status)}" 
+                                             role="progressbar" 
+                                             style="width: ${row.progress_percentage}%"
+                                             aria-valuenow="${row.progress_percentage}" 
+                                             aria-valuemin="0" 
+                                             aria-valuemax="100">
+                                            ${row.progress_percentage}%
+                                        </div>
+                                    </div>
+                                `;
+                            }
+                            return row.progress_percentage;
+                        }
+                    },
+                    { 
+                        data: 'current_step',
+                        title: 'Current Step',
+                        width: '150px',
+                        render: function(data, type, row) {
+                            return data ? `<small>${data}</small>` : '-';
+                        }
+                    },
+                    { 
+                        data: 'uploaded_by_email',
+                        title: 'Uploader',
+                        render: function(data, type, row) {
+                            return `<small>${data}</small>`;
+                        }
+                    },
+                    { 
+                        data: 'created_at',
+                        title: 'Created',
+                        render: function(data, type, row) {
+                            if (type === 'display') {
+                                return `<small>${formatDateTime(data)}</small>`;
+                            }
+                            return data;
+                        }
+                    },
+                    { 
+                        data: 'duration_seconds',
+                        title: 'Duration',
+                        width: '100px',
+                        render: function(data, type, row) {
+                            return `<small>${formatDuration(data)}</small>`;
+                        }
+                    },
+                    { 
+                        data: null,
+                        title: 'Actions',
+                        width: '100px',
+                        orderable: false,
+                        render: function(data, type, row) {
+                            return `<button class="btn btn-sm btn-info" onclick="showJobDetails(${row.id})">
+                                <i class="bi bi-eye"></i> Details
+                            </button>`;
+                        }
+                    }
+                ],
+                order: [[6, 'desc']], // Sort by created_at descending
+                pageLength: 25,
+                lengthMenu: [[10, 25, 50, 100, -1], [10, 25, 50, 100, "All"]],
+                language: {
+                    search: "Search jobs:",
+                    lengthMenu: "Show _MENU_ jobs per page",
+                    info: "Showing _START_ to _END_ of _TOTAL_ jobs",
+                    infoEmpty: "No jobs available",
+                    infoFiltered: "(filtered from _MAX_ total jobs)",
+                    zeroRecords: "No matching jobs found",
+                    emptyTable: "No processing jobs available"
+                },
+                dom: '<"row"<"col-sm-12 col-md-6"l><"col-sm-12 col-md-6"f>>' +
+                     '<"row"<"col-sm-12"tr>>' +
+                     '<"row"<"col-sm-12 col-md-5"i><"col-sm-12 col-md-7"p>>',
+                responsive: true
+            });
+
+            // Setup status filter
+            $('#status-filter').on('change', function() {
+                const selectedStatus = this.value;
+                
+                if (selectedStatus === '') {
+                    jobsTable.column(2).search('').draw();
+                } else {
+                    jobsTable.column(2).search('^' + selectedStatus + '$', true, false).draw();
+                }
+            });
+
+            // Start auto-refresh (interval from settings)
+            const refreshInterval = {{ auto_refresh_interval|default:5 }} * 1000;
+            autoRefreshInterval = setInterval(refreshTable, refreshInterval);
+            
+            console.log('DataTable initialized with', refreshInterval / 1000, 'seconds auto-refresh');
+        });
+
+        // Stop auto-refresh when leaving page
+        window.addEventListener('beforeunload', () => {
+            if (autoRefreshInterval) {
+                clearInterval(autoRefreshInterval);
+            }
+        });
+    </script>
+</div>
+
+{% else %}
+    <div class="container">
+        <div class="alert alert-danger" role="alert">
+            <p>Permission Denied.</p>
+        </div>
+    </div>
+{% endif %}
+{% endblock %}

@@ -70,6 +70,24 @@ class ThermalFilesUploadView(base.TemplateView):
         return shortcuts.render(request, self.template_name, context)
 
 
+class UploadMonitorView(base.TemplateView):
+    """Combined upload and processing jobs monitor view."""
+
+    template_name = "govapp/upload-monitor.html"
+
+    def get(self, request: http.HttpRequest, *args: Any, **kwargs: Any) -> http.HttpResponse:
+        from django.conf import settings
+        
+        # Construct Context
+        context: dict[str, Any] = {
+            'has_view_permission': IsInAdminOrOfficersGroup().has_permission(request, self),
+            'has_upload_permission': IsInAdministratorsGroup().has_permission(request, self),
+            'auto_refresh_interval': settings.DASHBOARD_AUTO_REFRESH_INTERVAL,
+        }
+
+        return shortcuts.render(request, self.template_name, context)
+
+
 class UploadsHistoryView(base.TemplateView):
     """Thermal files uploaded after processing."""
 

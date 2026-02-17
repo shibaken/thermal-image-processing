@@ -1,8 +1,8 @@
 {% if request.user.is_authenticated is True %}
-<li class="nav-item"><a class="nav-link" href="/files-dashboard" id="primary-menu-item-thermal-files">Thermal Files</a></li>
-<li class="nav-item"><a class="nav-link" href="/upload-files" id="primary-menu-item-upload">Upload File</a></li>
-<li class="nav-item"><a class="nav-link" href="/uploads-history" id="primary-menu-item-history">Archives</a></li>
+<li class="nav-item"><a class="nav-link" href="/upload-monitor" id="primary-menu-item-upload-monitor">Upload &amp; Monitor</a></li>
+<li class="nav-item"><a class="nav-link" href="/files-dashboard" id="primary-menu-item-processed-data">Processed Data</a></li>
+<li class="nav-item"><a class="nav-link" href="/uploads-history" id="primary-menu-item-archives">Archives</a></li>
 
 {% else %}
-    <li class="nav-item"><a class="nav-link" href="#" id="primary-menu-item-thermal-files">Thermal Files</a></li>
+    <li class="nav-item"><a class="nav-link" href="#" id="primary-menu-item-upload-monitor">Upload &amp; Monitor</a></li>
 {% endif %}

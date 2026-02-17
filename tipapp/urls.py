@@ -45,6 +45,7 @@ urlpatterns = [
     urls.path("", views.ThermalFilesDashboardView.as_view(), name="home"),
     urls.path("files-dashboard", views.ThermalFilesDashboardView.as_view(), name="files-dashboard"),
     urls.path("upload-files", views.ThermalFilesUploadView.as_view(), name="upload-files"),
+    urls.path("upload-monitor", views.UploadMonitorView.as_view(), name="upload-monitor"),
     urls.path("uploads-history", views.UploadsHistoryView.as_view(), name="uploads-history"),
     
     # Phase 6: Processing Jobs Dashboard
