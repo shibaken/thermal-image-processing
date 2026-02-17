@@ -48,27 +48,41 @@ class ImportsProcessor():
                 import re
                 
                 job = None
-                flight_name = filename
-                # Remove .7z or .zip extension
-                if flight_name.lower().endswith('.7z'):
-                    flight_name = flight_name[:-3]
-                elif flight_name.lower().endswith('.zip'):
-                    flight_name = flight_name[:-4]
-                # Remove timestamp if present (format: .YYYYMMDD_HHMMSS)
-                flight_name = re.sub(r'\.\d{8}_\d{6}$', '', flight_name)
                 
+                # Try to find job by file_path first (handles duplicate uploads with suffixed flight_names)
                 try:
-                    job = ThermalProcessingJob.objects.get(flight_name=flight_name)
-                    job.status = 'PROCESSING'
-                    job.processing_started_at = timezone.now()
-                    job.current_step = 'Starting file preparation'
-                    job.progress_percentage = 5
-                    job.save()
-                    logger.info(f"Job {job.id} status updated to PROCESSING")
+                    job = ThermalProcessingJob.objects.get(file_path=entry.path)
+                    logger.info(f"Job found by file_path: {job.id} (flight_name={job.flight_name})")
                 except ThermalProcessingJob.DoesNotExist:
-                    logger.warning(f"Job record not found for {flight_name}, processing will continue without tracking")
+                    # Fallback: try to find by flight_name extracted from filename
+                    flight_name = filename
+                    # Remove .7z or .zip extension
+                    if flight_name.lower().endswith('.7z'):
+                        flight_name = flight_name[:-3]
+                    elif flight_name.lower().endswith('.zip'):
+                        flight_name = flight_name[:-4]
+                    # Remove timestamp if present (format: .YYYYMMDD_HHMMSS)
+                    flight_name = re.sub(r'\.\d{8}_\d{6}$', '', flight_name)
+                    
+                    try:
+                        job = ThermalProcessingJob.objects.get(flight_name=flight_name)
+                        logger.info(f"Job found by flight_name: {job.id}")
+                    except ThermalProcessingJob.DoesNotExist:
+                        logger.warning(f"Job record not found for file {filename} (tried file_path and flight_name={flight_name}), processing will continue without tracking")
                 except Exception as e:
-                    logger.error(f"Error updating job status: {e}", exc_info=True)
+                    logger.error(f"Error searching for job record: {e}", exc_info=True)
+                
+                # Update job status to PROCESSING if found
+                if job:
+                    try:
+                        job.status = 'PROCESSING'
+                        job.processing_started_at = timezone.now()
+                        job.current_step = 'Starting file preparation'
+                        job.progress_percentage = 5
+                        job.save()
+                        logger.info(f"Job {job.id} status updated to PROCESSING")
+                    except Exception as e:
+                        logger.error(f"Error updating job status: {e}", exc_info=True)
 
                 try:
                     # =========================================================

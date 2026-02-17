@@ -240,6 +240,16 @@ def api_upload_thermal_files(request, *args, **kwargs):
         import re
         flight_name = re.sub(r'\.\d{8}_\d{6}$', '', flight_name)
         
+        # Check for duplicate flight_name and add suffix if necessary
+        base_flight_name = flight_name
+        counter = 1
+        while ThermalProcessingJob.objects.filter(flight_name=flight_name).exists():
+            counter += 1
+            flight_name = f"{base_flight_name}_{counter}"
+        
+        if counter > 1:
+            logger.info(f"Duplicate flight name detected. Using '{flight_name}' instead of '{base_flight_name}'")
+        
         try:
             # Get file size
             file_size = os.path.getsize(save_path)
