@@ -5,6 +5,7 @@ DBCA_Districts_4326.7z
 thermal_image_processing.py.save
 thermal_image_processing_bkp.py
 venv
+cache/
 tipapp/cache
 tipapp/logs/
 pending_imports/
