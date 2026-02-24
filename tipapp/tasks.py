@@ -1,10 +1,11 @@
 import os
 import re
+import hashlib
 import logging
 from datetime import datetime, timezone
-from pathlib import Path
-import py7zr
 from zoneinfo import ZoneInfo
+
+from django.core.cache import cache
 
 from tipapp import settings
 
@@ -32,9 +33,33 @@ def get_files_list(dir_path, extensions = []):
     return files_list
 
 def get_dir_size(dir_path):
+    # Use a short cache key derived from the absolute path so keys stay within limits.
+    cache_key = "dir_size_" + hashlib.md5(dir_path.encode()).hexdigest()
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
+
     try:
-        root_directory = Path(dir_path)
-        return sum(f.stat().st_size for f in root_directory.glob('**/*') if f.is_file())
+        total = 0
+        # os.scandir-based recursive walk is significantly faster than Path.glob('**/*')
+        # because it avoids constructing Path objects for every entry.
+        dirs = [dir_path]
+        while dirs:
+            current = dirs.pop()
+            try:
+                with os.scandir(current) as it:
+                    for entry in it:
+                        try:
+                            if entry.is_file(follow_symlinks=False):
+                                total += entry.stat(follow_symlinks=False).st_size
+                            elif entry.is_dir(follow_symlinks=False):
+                                dirs.append(entry.path)
+                        except OSError:
+                            pass
+            except OSError:
+                pass
+        cache.set(cache_key, total, settings.DIR_SIZE_CACHE_TTL)
+        return total
     except Exception as e:
         logger.error(f"Error getting size of directory: {dir_path}")
         logger.error(e)

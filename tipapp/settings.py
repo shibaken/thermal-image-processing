@@ -264,6 +264,11 @@ PRODUCTION_EMAIL= decouple.config("PRODUCTION_EMAIL", default=False, cast=bool)
 EMAIL_DELIVERY = decouple.config("EMAIL_DELIVERY", default="off")
 NOTIFICATION_RECIPIENTS = decouple.config('NOTIFICATION_RECIPIENTS', default='', cast=decouple.Csv())
 
+# Directory size cache TTL in seconds (default: 86400 = 24 hours).
+# Processed flight folders are essentially immutable, so a long TTL is safe.
+# Override with DIR_SIZE_CACHE_TTL in .env if needed.
+DIR_SIZE_CACHE_TTL = decouple.config('DIR_SIZE_CACHE_TTL', default=60 * 60 * 24, cast=int)
+
 # Group Settings
 GROUP_ADMIN = 'Admin'
 GROUP_OFFICERS = 'Officers'
