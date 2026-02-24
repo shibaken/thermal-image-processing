@@ -211,21 +211,6 @@ def api_upload_thermal_files(request, *args, **kwargs):
                 destination.write(chunk)
         logger.info(f"File: [{uploaded_file.name}] has been successfully saved at [{save_path}].")
         
-        # Create metadata file to track who uploaded this file
-        import json
-        from datetime import datetime, timezone
-        metadata_path = save_path + '.meta.json'
-        metadata = {
-            'uploaded_by': request.user.email if hasattr(request.user, 'email') else str(request.user),
-            'uploaded_by_username': request.user.username if hasattr(request.user, 'username') else str(request.user),
-            'uploaded_at': datetime.now(timezone.utc).isoformat(),
-            'original_filename': uploaded_file.name,
-            'saved_filename': newFileName,
-        }
-        with open(metadata_path, 'w') as f:
-            json.dump(metadata, f, indent=2)
-        logger.info(f"Metadata file created: [{metadata_path}]")
-        
         # Phase 2: Create job record for tracking
         from tipapp.models import ThermalProcessingJob
         
