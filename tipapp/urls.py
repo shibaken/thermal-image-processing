@@ -65,6 +65,7 @@ urlpatterns = [
     urls.path("api/processing-jobs/", views.list_processing_jobs, name="list_processing_jobs"),
     urls.path("api/processing-jobs/<int:job_id>/", views.get_job_status, name="get_job_status"),
     urls.path("api/processing-jobs/<int:job_id>/reset/", views.reset_stuck_job, name="reset_stuck_job"),
+    urls.path("api/processing-jobs/<int:job_id>/retire/", views.retire_job, name="retire_job"),
     # Django Administration
     urls.path("admin/", admin.site.urls),
 
