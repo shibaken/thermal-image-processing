@@ -450,6 +450,7 @@ def list_processing_jobs(request, *args, **kwargs):
     Query Parameters:
         - status: Filter by job status (UPLOADED, QUEUED, PROCESSING, COMPLETED, FAILED)
         - user_email: Filter by uploader email
+        - search: Search by flight name, original filename, or uploader email
         - page: Page number (default: 1)
         - page_size: Items per page (default: 20)
         - sort_by: Sort field (default: -created_at)
@@ -474,7 +475,9 @@ def list_processing_jobs(request, *args, **kwargs):
     search = request.GET.get('search', '').strip()
     if search:
         jobs = jobs.filter(
-            Q(flight_name__icontains=search) | Q(original_filename__icontains=search)
+            Q(flight_name__icontains=search) |
+            Q(original_filename__icontains=search) |
+            Q(uploaded_by_email__icontains=search)
         )
 
     # Apply sorting
