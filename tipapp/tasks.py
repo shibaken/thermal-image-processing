@@ -75,6 +75,10 @@ def get_thermal_files(dir_path, page, offset, search = "", sort_by = "name", sor
             # Skip metadata files (hidden files used for tracking upload information)
             if entry_name.endswith('.meta.json'):
                 continue
+
+            # Skip retired job folders (renamed by the retire_job action)
+            if '_retired_' in entry_name:
+                continue
             
             if search != "" and not re.search(str.lower(search), str.lower(entry_name)):
                 continue
