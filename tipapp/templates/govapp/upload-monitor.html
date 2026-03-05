@@ -119,6 +119,7 @@
         let jobsTable = null;
         const IS_ADMIN = {{ has_upload_permission|yesno:'true,false' }};
         let autoRefreshInterval = null;
+        let refreshInterval = 0; // Stored in outer scope so retireJob can restart the interval
         let suppressLoader = false; // When true, loader is hidden during the next ajax request (used for polling)
 
         // Helper functions
@@ -218,7 +219,7 @@
             }
         }
 
-        async function retireJob(jobId, flightName) {
+        async function retireJob(jobId, flightName, btn) {
             if (!confirm(
                 `Retire "${flightName}"?\n\nThis will:\n` +
                 `\u2022 Rename the processed data folder (adds _retired_ suffix)\n` +
@@ -226,6 +227,19 @@
                 `\u2022 Delete PostGIS spatial records for this flight\n\n` +
                 `This cannot be undone.`
             )) return;
+
+            // Pause auto-refresh immediately so it doesn't overwrite the spinner
+            // while the server is performing the (potentially slow) GeoServer deletion
+            if (autoRefreshInterval) {
+                clearInterval(autoRefreshInterval);
+                autoRefreshInterval = null;
+            }
+
+            // Show loading state on the button
+            const originalHtml = btn.innerHTML;
+            btn.disabled = true;
+            btn.innerHTML = `<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Retiring...`;
+
             try {
                 const response = await fetch(`/api/processing-jobs/${jobId}/retire/`, { method: 'POST', headers: { 'X-CSRFToken': getCookie('csrftoken') } });
                 const data = await response.json();
@@ -235,11 +249,46 @@
                         msg += '\n\nWarnings (non-fatal):\n' + data.warnings.join('\n');
                     }
                     alert(msg);
-                    refreshTable();
+                    // Slide up the row, then refresh and restart auto-refresh
+                    const row = btn.closest('tr');
+                    const height = row.offsetHeight;
+                    row.style.overflow = 'hidden';
+                    row.style.transition = 'none';
+                    row.style.height = height + 'px';
+                    row.style.opacity = '1';
+                    // Use double rAF to ensure the browser has applied the initial values
+                    // before starting the transition
+                    requestAnimationFrame(function() {
+                        requestAnimationFrame(function() {
+                            row.style.transition = 'height 0.8s ease, opacity 0.8s ease, padding 0.8s ease';
+                            row.style.height = '0';
+                            row.style.opacity = '0';
+                            row.style.paddingTop = '0';
+                            row.style.paddingBottom = '0';
+                            setTimeout(function() {
+                                refreshTable();
+                                if (refreshInterval > 0) {
+                                    autoRefreshInterval = setInterval(refreshTable, refreshInterval);
+                                }
+                            }, 900);
+                        });
+                    });
                 } else {
+                    btn.disabled = false;
+                    btn.innerHTML = originalHtml;
+                    // Restart auto-refresh on error
+                    if (refreshInterval > 0 && !autoRefreshInterval) {
+                        autoRefreshInterval = setInterval(refreshTable, refreshInterval);
+                    }
                     alert('Error: ' + (data.error || 'Unknown error'));
                 }
             } catch (error) {
+                btn.disabled = false;
+                btn.innerHTML = originalHtml;
+                // Restart auto-refresh on error
+                if (refreshInterval > 0 && !autoRefreshInterval) {
+                    autoRefreshInterval = setInterval(refreshTable, refreshInterval);
+                }
                 alert('Request failed: ' + error);
             }
         }
@@ -447,7 +496,7 @@
 
                             // Add retire button for completed jobs (admin only)
                             if (row.status === 'COMPLETED' && IS_ADMIN) {
-                                buttons += ` <button class="btn btn-sm btn-outline-secondary mb-1" onclick="retireJob(${row.id}, '${row.flight_name}')">
+                                buttons += ` <button class="btn btn-sm btn-outline-secondary mb-1" onclick="retireJob(${row.id}, '${row.flight_name}', this)">
                                     <i class="bi bi-archive"></i> Retire
                                 </button>`;
                             }
@@ -514,7 +563,7 @@
             });
 
             // Start auto-refresh (interval from settings)
-            const refreshInterval = {{ auto_refresh_interval|default:3 }} * 1000;
+            refreshInterval = {{ auto_refresh_interval|default:3 }} * 1000;
             autoRefreshInterval = setInterval(refreshTable, refreshInterval);
             
             console.log('DataTable initialized with', refreshInterval / 1000, 'seconds auto-refresh');
