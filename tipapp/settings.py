@@ -323,6 +323,18 @@ DATA_STORAGE_FOLDER_NAME = "thermal_data_processing"
 DOWNLOADS_FOLDER_NAME = "thermal_downloads"
 UPLOADS_HISTORY_FOLDER_NAME = "thermal_files_uploaded"
 
+# District spatial data sync from KB (Kaartdijin Boodja)
+DISTRICTS_KB_URL = decouple.config(
+    "general_districts_kb_url",
+    default=(
+        "https://kb.dbca.wa.gov.au/geoserver/kaartdijin-boodja-public/ows"
+        "?service=WFS&version=1.0.0&request=GetFeature"
+        "&typeName=kaartdijin-boodja-public%3ACPT_DBCA_DISTRICTS"
+        "&outputFormat=application%2Fx-gpkg"
+    ),
+)
+DISTRICTS_GPKG_PATH = decouple.config("general_districts_dataset_name", default=None)
+
 PENDING_IMPORT_PATH = decouple.config("PENDING_IMPORT_PATH", default=os.path.join(BASE_DIR, PENDING_IMPORT_FOLDER_NAME))
 DATA_STORAGE = decouple.config("DATA_STORAGE", default=os.path.join(BASE_DIR, DATA_STORAGE_FOLDER_NAME))
 DOWNLOADS_PATH = decouple.config("DOWNLOADS_PATH", default=os.path.join(BASE_DIR, DOWNLOADS_FOLDER_NAME))
