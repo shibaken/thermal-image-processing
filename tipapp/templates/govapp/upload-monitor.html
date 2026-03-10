@@ -489,8 +489,9 @@
                             
                             // Add reset button for stuck PROCESSING jobs (admin only)
                             if (row.status === 'PROCESSING' && IS_ADMIN) {
-                                buttons += ` <button class="btn btn-sm btn-warning mb-1" onclick="resetStuckJob(${row.id}, '${row.flight_name}')">
-                                    <i class="bi bi-arrow-counterclockwise"></i> Reset
+                                buttons += ` <button class="btn btn-sm btn-warning mb-1" onclick="resetStuckJob(${row.id}, '${row.flight_name}')"
+                                    title="Mark as Failed — use this only if the job is stuck due to a server crash. This does NOT retry processing.">
+                                    <i class="bi bi-x-circle"></i> Mark as Failed
                                 </button>`;
                             }
 
