@@ -63,17 +63,31 @@ class DistrictsLayerSync:
 
     def download_layer(self, url):
         dest_dir = Path(self.dest_path).parent
+        tmp_fd = None
+        tmp_path = None
         try:
             dest_dir.mkdir(parents=True, exist_ok=True)
             tmp_fd, tmp_path = tempfile.mkstemp(dir=dest_dir, suffix=".gpkg.tmp")
             with requests.get(url, stream=True, timeout=120) as r:
                 r.raise_for_status()
                 with os.fdopen(tmp_fd, "wb") as f:
+                    tmp_fd = None  # os.fdopen takes ownership; prevent double-close
                     for chunk in r.iter_content(chunk_size=8192):
                         f.write(chunk)
             logger.info(f"Layer downloaded and saved as {tmp_path}")
             return tmp_path, None
         except Exception as e:
+            # Clean up the fd and temp file to avoid fd exhaustion and disk leaks
+            if tmp_fd is not None:
+                try:
+                    os.close(tmp_fd)
+                except OSError:
+                    pass
+            if tmp_path is not None:
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
             return None, f"Error downloading layer: {str(e)}"
 
 
