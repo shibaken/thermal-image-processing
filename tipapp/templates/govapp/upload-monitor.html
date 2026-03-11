@@ -222,7 +222,7 @@
         async function retireJob(jobId, flightName, btn) {
             if (!confirm(
                 `Retire "${flightName}"?\n\nThis will:\n` +
-                `\u2022 Rename the processed data folder (adds _retired_ suffix)\n` +
+                `\u2022 Move the processed data folder to the retired archive\n` +
                 `\u2022 Delete GeoServer Coverage Stores for this flight\n` +
                 `\u2022 Delete PostGIS spatial records for this flight\n\n` +
                 `This cannot be undone.`

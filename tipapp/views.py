@@ -685,23 +685,22 @@ def retire_job(request, job_id, *args, **kwargs):
     flight_name = job.flight_name
     # flight_timestamp is used for GeoServer store names and PostGIS flight_datetime column
     flight_timestamp = flight_name.replace("FireFlight_", "")
-    retired_suffix = f"_retired_{timezone.now().strftime('%Y%m%d_%H%M%S')}"
 
     errors = []
 
     # ------------------------------------------------------------------
-    # Step 1: Rename the processed data folder
+    # Step 1: Move the processed data folder to the retired archive
     # ------------------------------------------------------------------
-    data_storage = settings.DATA_STORAGE
-    original_folder = os.path.join(data_storage, flight_name)
-    retired_folder = os.path.join(data_storage, flight_name + retired_suffix)
+    import shutil as _shutil
+    original_folder = os.path.join(settings.DATA_STORAGE, flight_name)
+    retired_dest = os.path.join(settings.RETIRED_STORAGE, flight_name)
 
     if os.path.exists(original_folder):
         try:
-            os.rename(original_folder, retired_folder)
-            logger.info(f"Retired folder renamed: {original_folder} -> {retired_folder}")
+            _shutil.move(original_folder, retired_dest)
+            logger.info(f"Retired folder moved: {original_folder} -> {retired_dest}")
         except Exception as e:
-            error_msg = f"Failed to rename folder: {e}"
+            error_msg = f"Failed to move folder to retired archive: {e}"
             logger.error(error_msg, exc_info=True)
             errors.append(error_msg)
     else:
