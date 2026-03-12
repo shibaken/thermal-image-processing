@@ -656,19 +656,13 @@ def reset_stuck_job(request, job_id, *args, **kwargs):
 @permission_classes([IsInAdministratorsGroup])
 def retire_job(request, job_id, *args, **kwargs):
     """
-    Retire a completed thermal processing job.
+    Queue a completed thermal processing job for retirement.
 
-    This performs the following operations in order:
-    1. Rename the processed data folder with a _retired_{timestamp} suffix
-    2. Delete all GeoServer Coverage Stores for this flight (mosaic + individual images)
-    3. Delete all related PostGIS records (footprints, boundaries, centroids)
-    4. Update the job record to RETIRED status with retired_at timestamp
+    Sets the job status to RETIRE_QUEUED so the process_retire_queue
+    cron job can pick it up and perform the heavy work asynchronously.
 
-    Only COMPLETED jobs can be retired.
+    Only COMPLETED jobs can be queued for retirement.
     """
-    import requests as http_requests
-    from django.utils import timezone
-    from sqlalchemy import create_engine, text
     from tipapp.models import ThermalProcessingJob
 
     try:
@@ -682,147 +676,13 @@ def retire_job(request, job_id, *args, **kwargs):
             status=400,
         )
 
-    flight_name = job.flight_name
-    # flight_timestamp is used for GeoServer store names and PostGIS flight_datetime column
-    flight_timestamp = flight_name.replace("FireFlight_", "")
+    job.status = 'RETIRE_QUEUED'
+    job.current_step = f"Retire queued by {request.user.email if hasattr(request.user, 'email') else request.user}"
+    job.save(update_fields=['status', 'current_step', 'updated_at'])
+    logger.info(f"Job {job.id} ({job.flight_name}) queued for retirement by {request.user}.")
 
-    errors = []
-
-    # ------------------------------------------------------------------
-    # Step 1: Move the processed data folder to the retired archive
-    # ------------------------------------------------------------------
-    import shutil as _shutil
-    original_folder = os.path.join(settings.DATA_STORAGE, flight_name)
-    retired_dest = os.path.join(settings.RETIRED_STORAGE, flight_name)
-
-    if os.path.exists(original_folder):
-        try:
-            _shutil.move(original_folder, retired_dest)
-            logger.info(f"Retired folder moved: {original_folder} -> {retired_dest}")
-        except Exception as e:
-            error_msg = f"Failed to move folder to retired archive: {e}"
-            logger.error(error_msg, exc_info=True)
-            errors.append(error_msg)
-    else:
-        logger.warning(f"Processed data folder not found (may have been moved already): {original_folder}")
-
-    # ------------------------------------------------------------------
-    # Step 2: Delete GeoServer Coverage Stores
-    # ------------------------------------------------------------------
-    gs_user = os.environ.get('geoserver_user')
-    gs_pwd = os.environ.get('geoserver_password')
-    gs_url_base = os.environ.get('general_gs_url_base', 'https://hotspots.dbca.wa.gov.au/geoserver/rest/workspaces/hotspots/coveragestores/')
-
-    if gs_user and gs_pwd:
-        try:
-            # List all coverage stores to find individual image stores for this flight
-            list_response = http_requests.get(
-                gs_url_base,
-                headers={'Accept': 'application/json'},
-                auth=(gs_user, gs_pwd),
-                timeout=30,
-            )
-            stores_to_delete = []
-
-            if list_response.status_code == 200:
-                store_list = list_response.json().get('coverageStores', {}).get('coverageStore', [])
-                img_prefix = f"{flight_timestamp}_img_"
-                for store in store_list:
-                    name = store.get('name', '')
-                    if name == f"{flight_name}.tif" or name.startswith(img_prefix):
-                        stores_to_delete.append(name)
-                logger.info(f"GeoServer stores to delete for {flight_name}: {stores_to_delete}")
-            else:
-                logger.warning(f"Could not list GeoServer stores (status {list_response.status_code}). Will attempt mosaic store deletion directly.")
-                stores_to_delete = [f"{flight_name}.tif"]
-
-            # Delete each store with recurse=true to cascade-delete layers
-            for store_name in stores_to_delete:
-                # GeoServer REST API treats the last dot-separated segment as a format
-                # specifier, so a store named "foo.tif" accessed as ".../foo.tif" is
-                # parsed as store="foo", format="tif" -> 404.
-                # Appending ".json" makes GeoServer parse it as store="foo.tif", format="json".
-                delete_url = f"{gs_url_base}{store_name}.json?recurse=true"
-                del_response = http_requests.delete(
-                    delete_url,
-                    auth=(gs_user, gs_pwd),
-                    timeout=30,
-                )
-                if del_response.status_code in [200, 404]:
-                    logger.info(f"GeoServer store deleted (or not found): {store_name} (status {del_response.status_code})")
-                else:
-                    error_msg = f"Failed to delete GeoServer store '{store_name}': status {del_response.status_code}"
-                    logger.error(error_msg)
-                    errors.append(error_msg)
-        except Exception as e:
-            error_msg = f"GeoServer deletion error: {e}"
-            logger.error(error_msg, exc_info=True)
-            errors.append(error_msg)
-    else:
-        logger.warning("GeoServer credentials not set; skipping GeoServer deletion.")
-
-    # ------------------------------------------------------------------
-    # Step 3: Delete TIF files from GeoServer storage (rclone mount)
-    # ------------------------------------------------------------------
-    import shutil
-    gs_storage_base = "/rclone-mounts/thermalimaging-flightmosaics"
-    mosaic_tif = os.path.join(gs_storage_base, f"{flight_name}.tif")
-    images_dir = os.path.join(gs_storage_base, f"{flight_name}_images")
-
-    for path, label in [(mosaic_tif, "mosaic TIF"), (images_dir, "images directory")]:
-        if os.path.exists(path):
-            try:
-                if os.path.isdir(path):
-                    shutil.rmtree(path)
-                else:
-                    os.remove(path)
-                logger.info(f"Deleted GeoServer storage {label}: {path}")
-            except Exception as e:
-                error_msg = f"Failed to delete GeoServer storage {label} '{path}': {e}"
-                logger.error(error_msg, exc_info=True)
-                errors.append(error_msg)
-        else:
-            logger.warning(f"GeoServer storage {label} not found (may have been removed already): {path}")
-
-    # ------------------------------------------------------------------
-    # Step 4: Delete PostGIS records
-    # ------------------------------------------------------------------
-    raw_postgis_url = os.environ.get('general_postgis_table', '')
-    if raw_postgis_url:
-        postgis_url = raw_postgis_url.replace('postgis://', 'postgresql://')
-        try:
-            engine = create_engine(postgis_url)
-            with engine.connect() as conn:
-                for table in ['hotspot_flight_footprints', 'hotspot_boundaries', 'hotspot_centroids']:
-                    result = conn.execute(
-                        text(f"DELETE FROM {table} WHERE flight_datetime = :ts"),
-                        {"ts": flight_timestamp},
-                    )
-                    conn.commit()
-                    logger.info(f"Deleted {result.rowcount} rows from {table} for flight_datetime={flight_timestamp}")
-        except Exception as e:
-            error_msg = f"PostGIS deletion error: {e}"
-            logger.error(error_msg, exc_info=True)
-            errors.append(error_msg)
-    else:
-        logger.warning("general_postgis_table not set; skipping PostGIS deletion.")
-
-    # ------------------------------------------------------------------
-    # Step 5: Update job record to RETIRED
-    # ------------------------------------------------------------------
-    now = timezone.now()
-    job.status = 'RETIRED'
-    job.retired_at = now
-    job.current_step = f"Retired by {request.user.email if hasattr(request.user, 'email') else request.user}"
-    job.save(update_fields=['status', 'retired_at', 'current_step', 'updated_at'])
-    logger.info(f"Job {job.id} ({flight_name}) retired by {request.user}.")
-
-    response_data = {
-        'message': f"Job {job.id} ({flight_name}) has been retired.",
+    return JsonResponse({
+        'message': f"Job {job.id} ({job.flight_name}) has been queued for retirement.",
         'job_id': job.id,
-        'retired_at': now.isoformat(),
-    }
-    if errors:
-        response_data['warnings'] = errors
-
-    return JsonResponse(response_data)
+        'status': 'RETIRE_QUEUED',
+    })
