@@ -281,6 +281,7 @@ GROUP_OFFICERS = 'Officers'
 CRON_CLASSES = [
     'appmonitor_client.cron.CronJobAppMonitorClient',
     'tipapp.management.commands.sync_districts_from_kb.SyncDistrictsFromKBCronJob',
+    'tipapp.management.commands.process_retire_queue_command.ProcessRetireQueueCronJob',
 ]
 MANAGEMENT_COMMANDS_PAGE_ENABLED = decouple.config('MANAGEMENT_COMMANDS_PAGE_ENABLED', default=False)
 
