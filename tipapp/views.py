@@ -678,7 +678,8 @@ def retire_job(request, job_id, *args, **kwargs):
 
     job.status = 'RETIRE_QUEUED'
     job.current_step = f"Retire queued by {request.user.email if hasattr(request.user, 'email') else request.user}"
-    job.save(update_fields=['status', 'current_step', 'updated_at'])
+    job.error_message = ''
+    job.save(update_fields=['status', 'current_step', 'error_message', 'updated_at'])
     logger.info(f"Job {job.id} ({job.flight_name}) queued for retirement by {request.user}.")
 
     return JsonResponse({
