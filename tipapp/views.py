@@ -194,6 +194,7 @@ def list_uploads_history_contents(request, *args, **kwargs):
 def api_upload_thermal_files(request, *args, **kwargs):
     if request.FILES:
         from tipapp.models import ThermalProcessingJob
+        from django.db import transaction, IntegrityError
         import re
 
         allowed_extensions = ['.zip', '.7z', '.pdf']
@@ -207,8 +208,7 @@ def api_upload_thermal_files(request, *args, **kwargs):
         if file_extension.lower() not in allowed_extensions:
             return JsonResponse({'error': 'Invalid file type. Only .zip and .7z files are allowed.'}, status=400)
 
-        # Phase 2: Extract flight name and check for duplicates BEFORE saving the file.
-        # This prevents orphaned files in pending_imports if the upload is rejected.
+        # Phase 2: Extract flight name.
         # Example: FireFlight_20211203_052327.20260213_155626.7z -> FireFlight_20211203_052327
         flight_name = newFileName
         if flight_name.lower().endswith('.7z'):
@@ -218,36 +218,48 @@ def api_upload_thermal_files(request, *args, **kwargs):
         # Remove upload timestamp suffix (format: .YYYYMMDD_HHMMSS)
         flight_name = re.sub(r'\.\d{8}_\d{6}$', '', flight_name)
 
-        if ThermalProcessingJob.objects.filter(flight_name=flight_name).exists():
-            logger.warning(f"Upload rejected: flight '{flight_name}' already exists.")
+        # Phase 3: Save file and create job record atomically.
+        # The duplicate check and INSERT are wrapped in a transaction so that
+        # concurrent uploads of the same flight_name cannot both pass the check.
+        # If a race condition causes an IntegrityError (unique constraint on
+        # flight_name), the file is removed and a 409 is returned — no orphan.
+        save_path = os.path.join(settings.PENDING_IMPORT_PATH, newFileName)
+        try:
+            with transaction.atomic():
+                if ThermalProcessingJob.objects.filter(flight_name=flight_name).exists():
+                    logger.warning(f"Upload rejected: flight '{flight_name}' already exists.")
+                    return JsonResponse(
+                        {'error': f"Flight '{flight_name}' already exists. Please retire the existing data before re-uploading."},
+                        status=409,
+                    )
+
+                # Write file inside the transaction so a DB failure can trigger cleanup.
+                with open(save_path, 'wb+') as destination:
+                    for chunk in uploaded_file.chunks():
+                        destination.write(chunk)
+                logger.info(f"File: [{uploaded_file.name}] has been successfully saved at [{save_path}].")
+
+                file_size = os.path.getsize(save_path)
+                job = ThermalProcessingJob.objects.create(
+                    flight_name=flight_name,
+                    original_filename=uploaded_file.name,
+                    status='QUEUED',  # File is in pending_imports, ready for processing
+                    file_size=file_size,
+                    file_path=save_path,
+                    uploaded_by=request.user if request.user.is_authenticated else None,
+                    uploaded_by_email=request.user.email if hasattr(request.user, 'email') else '',
+                )
+                logger.info(f"Job record created: ID={job.id}, Flight={flight_name}, Status={job.status}")
+
+        except IntegrityError:
+            # Concurrent upload slipped through: remove the orphaned file.
+            if os.path.exists(save_path):
+                os.remove(save_path)
+                logger.warning(f"Removed orphaned file '{save_path}' after IntegrityError for flight '{flight_name}'.")
             return JsonResponse(
                 {'error': f"Flight '{flight_name}' already exists. Please retire the existing data before re-uploading."},
                 status=409,
             )
-
-        # Phase 3: Save the file
-        save_path = os.path.join(settings.PENDING_IMPORT_PATH, newFileName)
-        with open(save_path, 'wb+') as destination:
-            for chunk in uploaded_file.chunks():
-                destination.write(chunk)
-        logger.info(f"File: [{uploaded_file.name}] has been successfully saved at [{save_path}].")
-
-        # Phase 4: Create job record for tracking
-        try:
-            file_size = os.path.getsize(save_path)
-            job = ThermalProcessingJob.objects.create(
-                flight_name=flight_name,
-                original_filename=uploaded_file.name,
-                status='QUEUED',  # File is in pending_imports, ready for processing
-                file_size=file_size,
-                file_path=save_path,
-                uploaded_by=request.user if request.user.is_authenticated else None,
-                uploaded_by_email=request.user.email if hasattr(request.user, 'email') else '',
-            )
-            logger.info(f"Job record created: ID={job.id}, Flight={flight_name}, Status={job.status}")
-        except Exception as e:
-            # Log error but don't fail the upload
-            logger.error(f"Failed to create job record for {flight_name}: {e}", exc_info=True)
 
         file_info = get_file_record(settings.PENDING_IMPORT_PATH, newFileName)
         return JsonResponse({'message': 'File(s) uploaded successfully.', 'data': file_info})
