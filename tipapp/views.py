@@ -656,12 +656,14 @@ def reset_stuck_job(request, job_id, *args, **kwargs):
 @permission_classes([IsInAdministratorsGroup])
 def retire_job(request, job_id, *args, **kwargs):
     """
-    Queue a completed thermal processing job for retirement.
+    Queue a thermal processing job for retirement.
 
     Sets the job status to RETIRE_QUEUED so the process_retire_queue
     cron job can pick it up and perform the heavy work asynchronously.
 
-    Only COMPLETED jobs can be queued for retirement.
+    Retirable statuses: COMPLETED, RETIRE_FAILED, FAILED, QUEUED, UPLOADED.
+    Jobs that are actively running (PROCESSING, RETIRING, RETIRE_QUEUED)
+    cannot be retired until they finish.
     """
     from tipapp.models import ThermalProcessingJob
 
@@ -670,9 +672,10 @@ def retire_job(request, job_id, *args, **kwargs):
     except ThermalProcessingJob.DoesNotExist:
         return JsonResponse({'error': 'Job not found'}, status=404)
 
-    if job.status not in ('COMPLETED', 'RETIRE_FAILED'):
+    RETIRABLE_STATUSES = ('COMPLETED', 'RETIRE_FAILED', 'FAILED', 'QUEUED', 'UPLOADED')
+    if job.status not in RETIRABLE_STATUSES:
         return JsonResponse(
-            {'error': f"Only COMPLETED or RETIRE_FAILED jobs can be queued for retirement (current status: {job.status})."},
+            {'error': f"Cannot retire a job with status '{job.status}'. Only {', '.join(RETIRABLE_STATUSES)} jobs can be queued for retirement."},
             status=400,
         )
 
