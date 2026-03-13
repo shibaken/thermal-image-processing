@@ -518,17 +518,16 @@
                                 </button>`;
                             }
 
-                            // Add retire button for completed jobs (admin only)
-                            if (row.status === 'COMPLETED' && IS_ADMIN) {
-                                buttons += ` <button class="btn btn-sm btn-outline-secondary mb-1" onclick="retireJob(${row.id}, '${row.flight_name}', this)">
-                                    <i class="bi bi-archive"></i> Retire
-                                </button>`;
-                            }
-
-                            // Add retry button for retire-failed jobs (admin only)
-                            if (row.status === 'RETIRE_FAILED' && IS_ADMIN) {
-                                buttons += ` <button class="btn btn-sm btn-outline-danger mb-1" onclick="retireJob(${row.id}, '${row.flight_name}', this)">
-                                    <i class="bi bi-arrow-repeat"></i> Retry Retire
+                            // Add retire button for retirable jobs (admin only).
+                            // Must match RETIRABLE_STATUSES in views.retire_job.
+                            const RETIRABLE_STATUSES = ['COMPLETED', 'RETIRE_FAILED', 'FAILED', 'QUEUED', 'UPLOADED'];
+                            if (RETIRABLE_STATUSES.includes(row.status) && IS_ADMIN) {
+                                const isRetryRetire = row.status === 'RETIRE_FAILED';
+                                const btnClass = isRetryRetire ? 'btn-outline-danger' : 'btn-outline-secondary';
+                                const btnIcon = isRetryRetire ? 'bi-arrow-repeat' : 'bi-archive';
+                                const btnLabel = isRetryRetire ? 'Retry Retire' : 'Retire';
+                                buttons += ` <button class="btn btn-sm ${btnClass} mb-1" onclick="retireJob(${row.id}, '${row.flight_name}', this)">
+                                    <i class="bi ${btnIcon}"></i> ${btnLabel}
                                 </button>`;
                             }
 
