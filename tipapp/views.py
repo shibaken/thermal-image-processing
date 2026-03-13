@@ -193,55 +193,48 @@ def list_uploads_history_contents(request, *args, **kwargs):
 @permission_classes([IsInAdministratorsGroup])
 def api_upload_thermal_files(request, *args, **kwargs):
     if request.FILES:
-        # uploaded_files = []  # Multiple files might be uploaded
+        from tipapp.models import ThermalProcessingJob
+        import re
+
         allowed_extensions = ['.zip', '.7z', '.pdf']
         uploaded_file = request.FILES.getlist('file')[0]
         newFileName = request.POST.get('newFileName', '')
 
         logger.info(f'File: [{uploaded_file.name}] is being uploaded...')
 
-        # Check file extensions
+        # Phase 1: Check file extension
         _, file_extension = os.path.splitext(uploaded_file.name)
         if file_extension.lower() not in allowed_extensions:
             return JsonResponse({'error': 'Invalid file type. Only .zip and .7z files are allowed.'}, status=400)
 
-        # Save files
-        save_path = os.path.join(settings.PENDING_IMPORT_PATH,  newFileName)
-        with open(save_path, 'wb+') as destination:
-            for chunk in uploaded_file.chunks():
-                destination.write(chunk)
-        logger.info(f"File: [{uploaded_file.name}] has been successfully saved at [{save_path}].")
-        
-        # Phase 2: Create job record for tracking
-        from tipapp.models import ThermalProcessingJob
-        
-        # Extract flight name from filename (remove extensions and timestamp)
+        # Phase 2: Extract flight name and check for duplicates BEFORE saving the file.
+        # This prevents orphaned files in pending_imports if the upload is rejected.
         # Example: FireFlight_20211203_052327.20260213_155626.7z -> FireFlight_20211203_052327
         flight_name = newFileName
-        # Remove .7z or .zip extension
         if flight_name.lower().endswith('.7z'):
             flight_name = flight_name[:-3]
         elif flight_name.lower().endswith('.zip'):
             flight_name = flight_name[:-4]
-        # Remove timestamp if present (format: .YYYYMMDD_HHMMSS)
-        import re
+        # Remove upload timestamp suffix (format: .YYYYMMDD_HHMMSS)
         flight_name = re.sub(r'\.\d{8}_\d{6}$', '', flight_name)
-        
-        # Check for duplicate flight_name and add suffix if necessary
-        base_flight_name = flight_name
-        counter = 1
-        while ThermalProcessingJob.objects.filter(flight_name=flight_name).exists():
-            counter += 1
-            flight_name = f"{base_flight_name}_{counter}"
-        
-        if counter > 1:
-            logger.info(f"Duplicate flight name detected. Using '{flight_name}' instead of '{base_flight_name}'")
-        
+
+        if ThermalProcessingJob.objects.filter(flight_name=flight_name).exists():
+            logger.warning(f"Upload rejected: flight '{flight_name}' already exists.")
+            return JsonResponse(
+                {'error': f"Flight '{flight_name}' already exists. Please retire the existing data before re-uploading."},
+                status=409,
+            )
+
+        # Phase 3: Save the file
+        save_path = os.path.join(settings.PENDING_IMPORT_PATH, newFileName)
+        with open(save_path, 'wb+') as destination:
+            for chunk in uploaded_file.chunks():
+                destination.write(chunk)
+        logger.info(f"File: [{uploaded_file.name}] has been successfully saved at [{save_path}].")
+
+        # Phase 4: Create job record for tracking
         try:
-            # Get file size
             file_size = os.path.getsize(save_path)
-            
-            # Create job record
             job = ThermalProcessingJob.objects.create(
                 flight_name=flight_name,
                 original_filename=uploaded_file.name,
@@ -255,9 +248,9 @@ def api_upload_thermal_files(request, *args, **kwargs):
         except Exception as e:
             # Log error but don't fail the upload
             logger.error(f"Failed to create job record for {flight_name}: {e}", exc_info=True)
-        
+
         file_info = get_file_record(settings.PENDING_IMPORT_PATH, newFileName)
-        return JsonResponse({'message': 'File(s) uploaded successfully.', 'data' : file_info})
+        return JsonResponse({'message': 'File(s) uploaded successfully.', 'data': file_info})
     else:
         logger.info(f"No file(s) were uploaded.")
         return JsonResponse({'error': 'No file(s) were uploaded.'}, status=400)
