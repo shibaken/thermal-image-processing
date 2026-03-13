@@ -60,6 +60,7 @@ def _retire_job(job, stdout=None):
     flight_name = job.flight_name
     # flight_timestamp is used for GeoServer store names and PostGIS flight_datetime column
     flight_timestamp = flight_name.replace("FireFlight_", "")
+    now = timezone.now()
 
     if stdout:
         stdout.write(f"Retiring job {job.id} ({flight_name})...")
@@ -77,6 +78,14 @@ def _retire_job(job, stdout=None):
     # ------------------------------------------------------------------
     original_folder = os.path.join(settings.DATA_STORAGE, flight_name)
     retired_dest = os.path.join(settings.RETIRED_STORAGE, flight_name)
+
+    # If the destination already exists (re-retirement of the same flight),
+    # append a timestamp to avoid shutil.move placing the folder inside it.
+    if os.path.exists(retired_dest):
+        retired_dest = f"{retired_dest}.RETIRED_{now.strftime('%Y%m%d_%H%M%S')}"
+        logger.warning(
+            f"Retired destination already exists; using timestamped path: {retired_dest}"
+        )
 
     if os.path.exists(original_folder):
         try:
@@ -219,7 +228,6 @@ def _retire_job(job, stdout=None):
     # ------------------------------------------------------------------
     # Step 5: Finalise the job record
     # ------------------------------------------------------------------
-    now = timezone.now()
     if errors:
         job.status = 'RETIRE_FAILED'
         job.error_message = '\n'.join(errors)
@@ -232,11 +240,15 @@ def _retire_job(job, stdout=None):
         if stdout:
             stdout.write(f"  -> Job {job.id} ({flight_name}) RETIRE_FAILED.")
     else:
+        # Rename flight_name to free up the unique slot for future re-uploads.
+        # Format: FireFlight_20231214_093139.RETIRED_20260313_143022
+        retired_flight_name = f"{flight_name}.RETIRED_{now.strftime('%Y%m%d_%H%M%S')}"
+        job.flight_name = retired_flight_name
         job.status = 'RETIRED'
         job.retired_at = now
         job.current_step = 'Retired'
-        job.save(update_fields=['status', 'retired_at', 'current_step', 'updated_at'])
-        logger.info(f"process_retire_queue: job {job.id} ({flight_name}) RETIRED successfully.")
+        job.save(update_fields=['flight_name', 'status', 'retired_at', 'current_step', 'updated_at'])
+        logger.info(f"process_retire_queue: job {job.id} ({flight_name}) RETIRED successfully. flight_name renamed to '{retired_flight_name}'.")
         if stdout:
             stdout.write(f"  -> Job {job.id} ({flight_name}) RETIRED.")
 

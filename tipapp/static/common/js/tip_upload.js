@@ -338,15 +338,26 @@ let tip_upload = {
             }
             if (!xhr.responseText) return;
             let errorResponse = JSON.parse(xhr.responseText);
-            progressBar.fadeOut("slow", function () {
-              progressBar.replaceWith(
-                $(
-                  '<span class="error-message">' +
-                    errorResponse.error +
-                    "</span>"
-                )
-              );
+            // progressBar may already be removed from the DOM (replaced by the
+            // spinner when progress hit 100%). Target the column directly instead.
+            progressBarContainer.find(".col-4").empty().append(
+              $('<span class="error-message"></span>').text(errorResponse.error)
+            );
+            progressBarContainer.find(".progress-text").empty();
+            // Inject a dismiss button into the icon column.
+            const dismissBtn = $(
+              '<span class="delete-icon" title="Dismiss">' +
+              '<svg width="24" height="24" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">' +
+              '<path d="M4 12L12 4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>' +
+              '<path d="M12 12L4 4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>' +
+              '</svg></span>'
+            );
+            dismissBtn.on("click", function () {
+              progressBarContainer.fadeOut("slow", function () {
+                $(this).remove();
+              });
             });
+            progressBarContainer.find(".col-1").last().empty().append(dismissBtn);
           },
         });
         xhrList.push(xhr);
